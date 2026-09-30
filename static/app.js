@@ -875,6 +875,14 @@ function layout() {
       wrap.appendChild(root);
       term.appendChild(wrap);
     }
+    requestAnimationFrame(() => {
+      for (const name of visibleNames()) {
+        const c = conns.get(name);
+        if (!c?.opened) continue;
+        fitConn(c);
+        c.term.refresh(0, c.term.rows - 1);
+      }
+    });
   }
   $('empty').hidden = conns.size > 0;
   for (const w of term.querySelectorAll('.leaf')) w.classList.toggle('focus', w.dataset.name === activeName);

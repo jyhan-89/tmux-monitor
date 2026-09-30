@@ -83,7 +83,8 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #term { flex:1; min-height:0; padding:4px; position:relative; touch-action:none; display:flex; }
 #paneholder { display:none; }
 .lroot { flex:1 1 0; min-width:0; min-height:0; display:flex; }
-.lsplit { display:flex; min-width:0; min-height:0; }
+.lroot > * { flex:1 1 0; }
+.lsplit { display:flex; min-width:0; min-height:0; overflow:hidden; }
 .lsplit.row { flex-direction:row; }
 .lsplit.col { flex-direction:column; }
 .leaf { position:relative; display:flex; flex-direction:column; flex:1 1 0; min-width:0; min-height:0; border:1px solid transparent; border-radius:4px; }
