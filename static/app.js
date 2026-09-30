@@ -947,16 +947,79 @@ function renderWinbar() {
     if (onclick) el.onclick = onclick;
     bar.appendChild(el);
   };
+  const chip = (label, current, onSelect, onClose, menu) => {
+    const b = document.createElement('button');
+    b.className = `wchip${current ? ' cur' : ''}`;
+    b.innerHTML = '<span class="wlabel"></span><span class="wx" title="닫기">×</span>';
+    b.querySelector('.wlabel').textContent = label;
+    b.onclick = onSelect;
+    b.querySelector('.wx').onclick = (e) => {
+      e.stopPropagation();
+      onClose();
+    };
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openCtx(e.clientX, e.clientY, menu());
+    });
+    bar.appendChild(b);
+  };
   add('창', 'lbl');
-  for (const w of s.windows) add(`${w.index}:${w.name}`, w.active ? 'cur' : '', () => selectTarget(s.name, w.index));
+  for (const w of s.windows) {
+    chip(`${w.index}:${w.name}`, w.active, () => selectTarget(s.name, w.index), () => killWindow(s, w), () => [
+      { label: '이 창으로 이동', run: () => selectTarget(s.name, w.index) },
+      { label: '창 이름 바꾸기', run: () => renameWindow(s.name, w) },
+      '-',
+      { label: '창 닫기', danger: true, run: () => killWindow(s, w) },
+    ]);
+  }
   add('＋', '', () => newWindow(s.name), '새 창 만들기');
   if (win && win.panes.length > 1) {
     add('|', 'sep');
     add('패널', 'lbl');
     for (const p of win.panes) {
-      add(`${p.index}:${p.command}`, p.active ? 'cur' : '', () => selectTarget(s.name, win.index, p.index));
+      chip(`${p.index}:${p.command}`, p.active, () => selectTarget(s.name, win.index, p.index), () => killPane(s.name, win, p), () => [
+        { label: '이 패널로 이동', run: () => selectTarget(s.name, win.index, p.index) },
+        '-',
+        { label: '패널 닫기', danger: true, run: () => killPane(s.name, win, p) },
+      ]);
     }
   }
+}
+
+async function killWindow(s, w) {
+  const last = s.windows.length === 1;
+  const msg = last
+    ? `'${s.name}'의 마지막 창이라 닫으면 세션 전체가 종료됩니다. 닫을까요?`
+    : `창 ${w.index}:${w.name}을(를) 닫을까요? 그 안에서 실행 중인 프로그램이 종료됩니다.`;
+  if (!confirm(msg)) return;
+  try {
+    await api('DELETE', `/sessions/${enc(s.name)}/windows/${w.index}`);
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  if (last) closeSession(s.name);
+  refresh();
+}
+
+async function renameWindow(name, w) {
+  const newName = prompt('창 이름', w.name);
+  if (!newName?.trim() || newName.trim() === w.name) return;
+  try {
+    await api('PATCH', `/sessions/${enc(name)}/windows/${w.index}`, { new_name: newName.trim() });
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  refresh();
+}
+
+async function killPane(name, win, p) {
+  if (!confirm(`패널 ${p.index}:${p.command}을(를) 닫을까요? 그 안에서 실행 중인 프로그램이 종료됩니다.`)) return;
+  try {
+    await api('DELETE', `/sessions/${enc(name)}/windows/${win.index}/panes/${p.index}`);
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  refresh();
 }
 
 async function selectTarget(name, window, pane) {

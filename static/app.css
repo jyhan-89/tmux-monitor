@@ -77,6 +77,11 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #winbar[hidden] { display:none; }
 #winbar button { flex:none; padding:2px 8px; font-size:12px; }
 #winbar button.cur { border-color:var(--accent); color:var(--accent); }
+#winbar .wchip { display:flex; align-items:center; gap:2px; padding:2px 4px 2px 8px; }
+#winbar .wx { padding:0 4px; border-radius:3px; color:var(--dim); visibility:hidden; }
+#winbar .wchip:hover .wx { visibility:visible; }
+#winbar .wx:hover { color:var(--fg); background:#4a4e57; }
+@media (hover:none) { #winbar .wx { visibility:visible; } }
 #winbar .sep { color:var(--line); padding:0 4px; }
 #winbar .lbl { color:var(--dim); flex:none; }
 

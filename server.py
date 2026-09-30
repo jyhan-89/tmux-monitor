@@ -309,6 +309,31 @@ def api_new_window(name: str):
     return {"ok": True}
 
 
+@api.delete("/sessions/{name}/windows/{window}")
+def api_kill_window(name: str, window: int):
+    run("kill-window", "-t", f"={name}:{window}")
+    return {"ok": True}
+
+
+class WindowRename(BaseModel):
+    new_name: str
+
+
+@api.patch("/sessions/{name}/windows/{window}")
+def api_rename_window(name: str, window: int, body: WindowRename):
+    new = body.new_name.strip()
+    if not new:
+        raise HTTPException(400, "창 이름을 입력하세요")
+    run("rename-window", "-t", f"={name}:{window}", new)
+    return {"ok": True}
+
+
+@api.delete("/sessions/{name}/windows/{window}/panes/{pane}")
+def api_kill_pane(name: str, window: int, pane: int):
+    run("kill-pane", "-t", f"={name}:{window}.{pane}")
+    return {"ok": True}
+
+
 @api.get("/sessions/{name}/capture")
 def api_capture(name: str, lines: int = 2000):
     s = find_session(name)
