@@ -52,6 +52,14 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def revalidate_static(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(f"{BASE_PREFIX}/static/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
 router = APIRouter()
 
 
