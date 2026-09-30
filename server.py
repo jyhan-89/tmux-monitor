@@ -42,6 +42,7 @@ LOCAL_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 MAX_UPLOAD = 200 * 1024 * 1024
 FILES_ROOT = Path(os.environ.get("TMUX_WEB_FILES_ROOT", "~")).expanduser().resolve()
 MAX_TEXT = 2 * 1024 * 1024
+APP_VERSION = str(max(int(p.stat().st_mtime) for p in STATIC_DIR.rglob("*") if p.is_file()))
 
 
 @asynccontextmanager
@@ -227,6 +228,11 @@ def api_logout(request: Request, response: Response):
     auth.drop_session(request.cookies.get(COOKIE))
     response.delete_cookie(COOKIE, path=f"{BASE_PREFIX}/")
     return {"ok": True}
+
+
+@api.get("/version")
+def api_version():
+    return {"version": APP_VERSION}
 
 
 @api.get("/sessions")

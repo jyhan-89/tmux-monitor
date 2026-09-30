@@ -155,6 +155,9 @@ dialog.big[open] { display:flex; flex-direction:column; }
 .dlghead h2 { flex:1; margin:0; }
 #copytext { flex:1; margin:0; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; font:12px/1.4 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; user-select:text; -webkit-user-select:text; }
 
+#updatebar { position:fixed; top:calc(8px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); z-index:80; display:flex; align-items:center; gap:8px; padding:6px 8px 6px 14px; background:#2c3a4f; border:1px solid var(--accent); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.45); font-size:14px; }
+#updatebar[hidden] { display:none; }
+#updatebar button { padding:4px 10px; }
 #toast { position:fixed; left:50%; bottom:calc(90px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:50; background:#34373d; border:1px solid var(--line); border-radius:8px; padding:8px 14px; max-width:90vw; box-shadow:0 4px 16px rgba(0,0,0,.4); }
 #toast[hidden] { display:none; }
 

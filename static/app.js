@@ -2279,6 +2279,25 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', checkConnections);
 window.addEventListener('pageshow', (e) => { if (e.persisted) checkConnections(); });
 
+let appVersion = null;
+
+async function checkVersion() {
+  let v;
+  try {
+    v = (await api('GET', '/version')).version;
+  } catch {
+    return;
+  }
+  if (appVersion === null) appVersion = v;
+  else if (v !== appVersion) $('updatebar').hidden = false;
+}
+
+$('updatereload').onclick = () => {
+  if (fb.editing && fb.dirty && !confirm('저장하지 않은 파일 변경 사항이 있습니다. 새로고침할까요?')) return;
+  location.reload();
+};
+$('updateclose').onclick = () => { $('updatebar').hidden = true; };
+
 (async function init() {
   setIme(LS.get('imeOn', true), false);
   setSnippets(!!LS.get('snippetsOn', false));
@@ -2305,4 +2324,7 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) checkConnections()
   loadConfig();
   initServiceWorker();
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 3000);
+  checkVersion();
+  setInterval(checkVersion, 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
 })();
