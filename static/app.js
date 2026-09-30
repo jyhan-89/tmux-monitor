@@ -458,8 +458,11 @@ async function renameSession(name) {
     conn.name = newName;
     conn.el.dataset.name = newName;
     conns.set(newName, conn);
-    const l = findLeaf(name);
-    if (l) l.name = newName;
+    const g = groupOf(name);
+    if (g) {
+      g.tabs[g.tabs.indexOf(name)] = newName;
+      if (g.active === name) g.active = newName;
+    }
     if (activeName === name) activeName = newName;
     saveTabs();
   }
@@ -631,8 +634,11 @@ function closeSession(name) {
   conn.term.dispose();
   conn.el.remove();
   conns.delete(name);
-  tree = without(tree, name);
-  if (activeName === name) activeName = leaves()[0]?.name || [...conns.keys()].pop() || null;
+  const g = groupOf(name);
+  removeFromGroups(name);
+  if (activeName === name) {
+    activeName = (g && groupById(g.gid)?.active) || leaves()[0]?.active || [...conns.keys()].pop() || null;
+  }
   layout();
   saveTabs();
   renderList();
@@ -641,12 +647,8 @@ function closeSession(name) {
 function activate(name, focus = true) {
   if (!conns.has(name)) return;
   const changed = activeName !== name;
-  if (!tree) {
-    tree = leaf(name);
-  } else if (!findLeaf(name)) {
-    const target = findLeaf(activeName) || leaves()[0];
-    target.name = name;
-  }
+  if (!groupOf(name)) addToGroup(name, groupOf(activeName) || leaves()[0]);
+  groupOf(name).active = name;
   activeName = name;
   layout();
   if (focus) focusInput();
@@ -662,7 +664,8 @@ function focusInput() {
   if (imeOn) $('ime').focus(); else c.term.focus();
 }
 
-const leaf = (name) => ({ t: 'leaf', name });
+let gidSeq = 0;
+const group = (tabs, active = tabs[0]) => ({ t: 'leaf', gid: `g${++gidSeq}`, tabs: [...tabs], active });
 
 function leaves(n = tree, out = []) {
   if (!n) return out;
@@ -671,17 +674,21 @@ function leaves(n = tree, out = []) {
   return out;
 }
 
-function findLeaf(name) {
-  return leaves().find((l) => l.name === name) || null;
+function groupOf(name) {
+  return leaves().find((g) => g.tabs.includes(name)) || null;
 }
 
-function without(n, name) {
+function groupById(gid) {
+  return leaves().find((g) => g.gid === gid) || null;
+}
+
+function prune(n) {
   if (!n) return null;
-  if (n.t === 'leaf') return n.name === name ? null : n;
+  if (n.t === 'leaf') return n.tabs.length ? n : null;
   const kids = [];
   const sizes = [];
   n.kids.forEach((k, i) => {
-    const r = without(k, name);
+    const r = prune(k);
     if (r) {
       kids.push(r);
       sizes.push(n.sizes[i]);
@@ -689,29 +696,54 @@ function without(n, name) {
   });
   if (!kids.length) return null;
   if (kids.length === 1) return kids[0];
+  if (kids.length === n.kids.length && kids.every((k, i) => k === n.kids[i])) return n;
   const sum = sizes.reduce((a, b) => a + b, 0);
   return { ...n, kids, sizes: sizes.map((s) => s / sum) };
 }
 
-function splitAt(n, target, name, side) {
+function removeFromGroups(name) {
+  const g = groupOf(name);
+  if (!g) return;
+  const i = g.tabs.indexOf(name);
+  g.tabs.splice(i, 1);
+  if (g.active === name) g.active = g.tabs[Math.min(i, g.tabs.length - 1)] || null;
+  tree = prune(tree);
+}
+
+function addToGroup(name, g, before = null, makeActive = true) {
+  if (!g) {
+    if (tree) return addToGroup(name, leaves()[0], before, makeActive);
+    tree = group([name]);
+    return;
+  }
+  let i = before ? g.tabs.indexOf(before) : -1;
+  if (i < 0) {
+    const a = g.tabs.indexOf(g.active);
+    i = a < 0 ? g.tabs.length : a + 1;
+  }
+  g.tabs.splice(i, 0, name);
+  if (makeActive || !g.active) g.active = name;
+}
+
+function splitAt(n, gid, g, side) {
   const dir = side === 'left' || side === 'right' ? 'row' : 'col';
   const first = side === 'left' || side === 'top';
   if (n.t === 'leaf') {
-    if (n.name !== target) return n;
-    return { t: 'split', dir, sizes: [0.5, 0.5], kids: first ? [leaf(name), n] : [n, leaf(name)] };
+    if (n.gid !== gid) return n;
+    return { t: 'split', dir, sizes: [0.5, 0.5], kids: first ? [g, n] : [n, g] };
   }
-  const i = n.kids.findIndex((k) => k.t === 'leaf' && k.name === target);
+  const i = n.kids.findIndex((k) => k.t === 'leaf' && k.gid === gid);
   if (i >= 0 && n.dir === dir) {
     const kids = [...n.kids];
     const sizes = [...n.sizes];
     const half = sizes[i] / 2;
     const at = first ? i : i + 1;
     sizes[i] = half;
-    kids.splice(at, 0, leaf(name));
+    kids.splice(at, 0, g);
     sizes.splice(at, 0, half);
     return { ...n, kids, sizes };
   }
-  return { ...n, kids: n.kids.map((k) => splitAt(k, target, name, side)) };
+  return { ...n, kids: n.kids.map((k) => splitAt(k, gid, g, side)) };
 }
 
 function sanitizeTree(n) {
@@ -719,9 +751,11 @@ function sanitizeTree(n) {
   const walk = (x) => {
     if (!x || typeof x !== 'object') return null;
     if (x.t === 'leaf') {
-      if (!conns.has(x.name) || seen.has(x.name)) return null;
-      seen.add(x.name);
-      return leaf(x.name);
+      const names = (Array.isArray(x.tabs) ? x.tabs : [x.name])
+        .filter((nm) => typeof nm === 'string' && conns.has(nm) && !seen.has(nm));
+      names.forEach((nm) => seen.add(nm));
+      if (!names.length) return null;
+      return group(names, names.includes(x.active) ? x.active : names[0]);
     }
     if (x.t !== 'split' || !Array.isArray(x.kids)) return null;
     const kids = [];
@@ -741,20 +775,30 @@ function sanitizeTree(n) {
   return walk(n);
 }
 
-function placeSession(name, target, zone) {
+function placeSession(name, gid, zone, before = null) {
   if (!conns.has(name)) conns.set(name, createConn(name));
-  if (!tree || !target || !findLeaf(target)) {
-    if (!tree) tree = leaf(name);
-    else if (!findLeaf(name)) (findLeaf(activeName) || leaves()[0]).name = name;
+  const target = gid ? groupById(gid) : null;
+  const from = groupOf(name);
+  if (!target) {
+    if (!from) addToGroup(name, groupOf(activeName) || leaves()[0]);
   } else if (zone === 'center') {
-    if (name !== target) {
-      const from = findLeaf(name);
-      const to = findLeaf(target);
-      if (from) from.name = target;
-      to.name = name;
+    if (from === target) {
+      if (before && before !== name) {
+        target.tabs.splice(target.tabs.indexOf(name), 1);
+        const bi = target.tabs.indexOf(before);
+        target.tabs.splice(bi < 0 ? target.tabs.length : bi, 0, name);
+      }
+      target.active = name;
+    } else {
+      if (from) removeFromGroups(name);
+      addToGroup(name, groupById(gid), before);
     }
-  } else if (name !== target) {
-    tree = splitAt(without(tree, name), target, name, zone);
+  } else if (from === target && target.tabs.length === 1) {
+    target.active = name;
+  } else {
+    if (from) removeFromGroups(name);
+    if (groupById(gid)) tree = splitAt(tree, gid, group([name]), zone);
+    else addToGroup(name, leaves()[0]);
   }
   activeName = name;
   layout();
@@ -763,53 +807,56 @@ function placeSession(name, target, zone) {
   focusInput();
 }
 
-function closePane(name) {
-  if (leaves().length < 2) return;
-  tree = without(tree, name);
-  if (activeName === name) activeName = leaves()[0].name;
-  layout();
-  saveTabs();
-  renderList();
-}
-
-function buildNode(n, multi) {
-  if (n.t === 'leaf') return buildLeaf(n.name, multi);
+function buildNode(n) {
+  if (n.t === 'leaf') return buildGroup(n);
   const box = document.createElement('div');
   box.className = `lsplit d-${n.dir}`;
   n.kids.forEach((k, i) => {
     if (i) box.appendChild(buildGutter(n, i));
-    const child = buildNode(k, multi);
+    const child = buildNode(k);
     child.style.flex = `${n.sizes[i]} 1 0`;
     box.appendChild(child);
   });
   return box;
 }
 
-function buildLeaf(name, multi) {
-  const conn = conns.get(name);
+function buildGroup(g) {
   const w = document.createElement('div');
   w.className = 'leaf';
-  w.dataset.name = name;
-  if (multi) {
-    const h = document.createElement('div');
-    h.className = 'leafhead';
-    h.draggable = true;
-    h.title = '끌어서 다른 위치로 옮기기';
-    h.innerHTML = '<span class="dot"></span><span class="lname"></span><button class="lclose" title="이 칸 닫기 (탭은 유지)">×</button>';
-    h.querySelector('.lname').textContent = name;
-    h.addEventListener('dragstart', (e) => {
+  w.dataset.gid = g.gid;
+  const strip = document.createElement('div');
+  strip.className = 'gtabs';
+  for (const name of g.tabs) {
+    const t = document.createElement('div');
+    t.className = `gtab${name === g.active ? ' active' : ''}`;
+    t.dataset.name = name;
+    t.draggable = true;
+    t.innerHTML = '<span class="dot"></span><span class="tname"></span><button class="tclose" title="탭 닫기 (세션은 유지)">×</button>';
+    t.querySelector('.tname').textContent = name;
+    t.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData(SESSION_MIME, name);
       e.dataTransfer.setData('text/plain', name);
       e.dataTransfer.effectAllowed = 'move';
     });
-    h.querySelector('.lclose').onclick = (e) => {
+    t.onclick = () => activate(name);
+    t.addEventListener('auxclick', (e) => {
+      if (e.button === 1) closeSession(name);
+    });
+    t.querySelector('.tclose').onclick = (e) => {
       e.stopPropagation();
-      closePane(name);
+      closeSession(name);
     };
-    h.addEventListener('mousedown', () => { if (activeName !== name) activate(name, false); });
-    w.appendChild(h);
+    strip.appendChild(t);
   }
-  w.appendChild(conn.el);
+  w.appendChild(strip);
+  w.appendChild(conns.get(g.active).el);
+  return w;
+}
+
+function buildSingle(name) {
+  const w = document.createElement('div');
+  w.className = 'leaf';
+  w.appendChild(conns.get(name).el);
   return w;
 }
 
@@ -853,13 +900,20 @@ function buildGutter(node, i) {
 
 function visibleNames() {
   if (narrow.matches) return activeName && conns.has(activeName) ? [activeName] : [];
-  return leaves().map((l) => l.name);
+  return leaves().map((g) => g.active).filter(Boolean);
 }
 
 function layout() {
-  for (const l of leaves()) if (!conns.has(l.name)) tree = without(tree, l.name);
-  if (!tree && activeName && conns.has(activeName)) tree = leaf(activeName);
-  if (activeName && !conns.has(activeName)) activeName = leaves()[0]?.name || null;
+  for (const g of leaves()) {
+    g.tabs = g.tabs.filter((n) => conns.has(n));
+    if (!g.tabs.includes(g.active)) g.active = g.tabs[0] || null;
+  }
+  tree = prune(tree);
+  if (activeName && !conns.has(activeName)) activeName = null;
+  for (const name of conns.keys()) {
+    if (!groupOf(name)) addToGroup(name, groupOf(activeName) || leaves()[0], null, false);
+  }
+  if (!activeName) activeName = leaves()[0]?.active || null;
   const key = narrow.matches ? `n:${activeName}` : JSON.stringify(tree, (k, v) => (k === 'sizes' ? undefined : v));
   const term = $('term');
   if (key !== layoutKey || !term.querySelector('.lroot')) {
@@ -869,10 +923,9 @@ function layout() {
     term.querySelector('.lroot')?.remove();
     const names = visibleNames();
     if (names.length) {
-      const root = narrow.matches ? buildLeaf(activeName, false) : buildNode(tree, names.length > 1);
       const wrap = document.createElement('div');
       wrap.className = `lroot${names.length > 1 ? ' multi' : ''}`;
-      wrap.appendChild(root);
+      wrap.appendChild(narrow.matches ? buildSingle(activeName) : buildNode(tree));
       term.appendChild(wrap);
     }
     requestAnimationFrame(() => {
@@ -885,7 +938,8 @@ function layout() {
     });
   }
   $('empty').hidden = conns.size > 0;
-  for (const w of term.querySelectorAll('.leaf')) w.classList.toggle('focus', w.dataset.name === activeName);
+  const focusGid = groupOf(activeName)?.gid;
+  for (const w of term.querySelectorAll('.leaf')) w.classList.toggle('focus', !!focusGid && w.dataset.gid === focusGid);
   for (const name of visibleNames()) {
     const c = conns.get(name);
     ensureOpen(c);
@@ -898,6 +952,14 @@ function layout() {
 function renderTabs() {
   const box = $('tabs');
   box.innerHTML = '';
+  for (const t of document.querySelectorAll('.gtab')) {
+    const s = sessions.find((x) => x.name === t.dataset.name);
+    const c = conns.get(t.dataset.name);
+    t.querySelector('.dot').className = `dot${s?.state ? ` st-${s.state}` : ''}`;
+    t.classList.toggle('offline', !(c?.ws && c.ws.readyState === WebSocket.OPEN));
+    t.title = s?.state ? `${t.dataset.name} · ${STATE_LABEL[s.state]}` : t.dataset.name;
+  }
+  if (!narrow.matches) return;
   for (const c of conns.values()) {
     const s = sessions.find((x) => x.name === c.name);
     const tab = document.createElement('div');
@@ -908,23 +970,11 @@ function renderTabs() {
     if (s?.state) tab.querySelector('.dot').classList.add(`st-${s.state}`);
     tab.querySelector('.tname').textContent = c.name;
     tab.title = s?.state ? `${c.name} · ${STATE_LABEL[s.state]}` : c.name;
-    tab.classList.toggle('shown', !!findLeaf(c.name));
-    tab.draggable = !narrow.matches;
-    tab.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData(SESSION_MIME, c.name);
-      e.dataTransfer.setData('text/plain', c.name);
-      e.dataTransfer.effectAllowed = 'move';
-    });
     tab.onclick = () => activate(c.name);
     tab.querySelector('.tclose').onclick = (e) => { e.stopPropagation(); closeSession(c.name); };
     box.appendChild(tab);
   }
   box.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  for (const h of document.querySelectorAll('.leafhead')) {
-    const s = sessions.find((x) => x.name === h.parentElement.dataset.name);
-    h.querySelector('.dot').className = `dot${s?.state ? ` st-${s.state}` : ''}`;
-    h.title = s?.state ? `${h.parentElement.dataset.name} · ${STATE_LABEL[s.state]} · 끌어서 옮기기` : '끌어서 옮기기';
-  }
 }
 
 function renderWinbar() {
@@ -2252,11 +2302,11 @@ aside.addEventListener('touchmove', (e) => {
 }, { passive: true });
 
 $('split').onclick = () => {
-  const hidden = [...conns.keys()].find((n) => !findLeaf(n));
-  if (!hidden || !activeName) {
-    return toast('탭이나 세션 목록의 세션을 터미널 영역 가장자리로 끌어다 놓으면 분할됩니다', 4000);
+  const g = groupOf(activeName);
+  if (!g || g.tabs.length < 2) {
+    return toast('이 영역에 탭이 하나뿐입니다. 탭이나 세션을 터미널 가장자리로 끌어다 놓으면 분할됩니다', 4000);
   }
-  placeSession(hidden, activeName, 'right');
+  placeSession(activeName, g.gid, 'right');
 };
 
 const dropzone = document.createElement('div');
@@ -2271,6 +2321,10 @@ function dropTarget(e) {
   const leafEl = e.target.closest?.('.leaf');
   if (!leafEl || !term.contains(leafEl)) return { target: null, zone: 'center', rect: tr, tr };
   const r = leafEl.getBoundingClientRect();
+  if (e.target.closest('.gtabs')) {
+    const before = e.target.closest('.gtab')?.dataset.name || null;
+    return { target: leafEl.dataset.gid, zone: 'center', before, rect: r, tr };
+  }
   const x = (e.clientX - r.left) / r.width;
   const y = (e.clientY - r.top) / r.height;
   const m = Math.min(x, 1 - x, y, 1 - y);
@@ -2282,7 +2336,7 @@ function dropTarget(e) {
     width: zone === 'left' || zone === 'right' ? r.width / 2 : r.width,
     height: zone === 'top' || zone === 'bottom' ? r.height / 2 : r.height,
   };
-  return { target: leafEl.dataset.name, zone, rect, tr };
+  return { target: leafEl.dataset.gid, zone, rect, tr };
 }
 
 function hideDropzone() {
@@ -2313,7 +2367,7 @@ $('term').addEventListener('drop', (e) => {
   const name = e.dataTransfer.getData(SESSION_MIME);
   const st = dropState || dropTarget(e);
   hideDropzone();
-  if (name && sessions.some((s) => s.name === name)) placeSession(name, st.target, st.zone);
+  if (name && sessions.some((s) => s.name === name)) placeSession(name, st.target, st.zone, st.before);
 });
 document.addEventListener('dragend', hideDropzone);
 narrow.addEventListener('change', layout);
@@ -2374,8 +2428,8 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
   }
   tree = sanitizeTree(LS.get('layout', null));
   const last = LS.get('activeTab', null);
-  activeName = last && conns.has(last) ? last : leaves()[0]?.name || [...conns.keys()][0] || null;
-  if (activeName && !narrow.matches && !findLeaf(activeName)) activate(activeName, false);
+  activeName = last && conns.has(last) ? last : null;
+  layout();
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);
