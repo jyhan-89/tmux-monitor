@@ -9,7 +9,7 @@ For remote access, use a VPN such as Tailscale — never expose it directly to t
 Free for personal, educational, research and other noncommercial use — see [License](#license).
 
 - 세션 목록/미리보기, Claude Code 상태(작업 중·확인 필요·대기) 표시와 푸시 알림
-- 탭·분할 화면, 자동 재연결, 한글 입력창, 모바일 특수키·제스처, 홈 화면 앱(PWA)
+- 탭·분할 화면(VS Code처럼 탭을 끌어 상하좌우 분할, 경계선으로 크기 조절), 자동 재연결, 한글 입력창, 모바일 특수키·제스처, 홈 화면 앱(PWA)
 - 세션 생성(작업 폴더·시작 명령)·이름 변경·종료, tmux 창/패널 전환
 - 정렬, 그룹(드래그로 이동), 파일 업로드, 화면 내용 복사
 - 파일 탐색: 홈 폴더 아래 폴더 탐색, Markdown 문서·코드(문법 색상) 보기, 선택적으로 파일 수정
