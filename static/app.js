@@ -1102,6 +1102,299 @@ $('notify').onclick = async () => {
   updateNotifyButton();
 };
 
+// ================= 파일 탐색 (읽기 전용) =================
+// Markdown/코드 보기 라이브러리는 처음 열 때만 불러옴
+
+const VIEWER_CSS = 'https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/styles/github-dark.min.css';
+const VIEWER_JS = [
+  'https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js',
+  'https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js',  // Markdown 속 HTML/스크립트 제거
+  'https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/highlight.min.js',
+];
+let viewerLibs = null;
+
+function loadViewerLibs() {
+  if (!viewerLibs) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = VIEWER_CSS;
+    document.head.appendChild(link);
+    viewerLibs = Promise.all(VIEWER_JS.map((src) => new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`불러오기 실패: ${src}`));
+      document.head.appendChild(s);
+    })));
+    viewerLibs.catch(() => { viewerLibs = null; });  // 다음에 다시 시도
+  }
+  return viewerLibs;
+}
+
+const fb = { path: null, root: '', session: null, file: null, text: '', truncated: false, rawMd: false };
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
+const MD_EXT = /\.(md|markdown|mdx)$/i;
+const LANG_BY_EXT = {
+  c: 'c', h: 'c', dts: 'c', dtsi: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp',
+  py: 'python', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+  sh: 'bash', bash: 'bash', zsh: 'bash', bb: 'bash', bbappend: 'bash', bbclass: 'bash',
+  json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini',
+  xml: 'xml', arxml: 'xml', html: 'xml', htm: 'xml', svg: 'xml', css: 'css', rs: 'rust', go: 'go',
+  java: 'java', kt: 'kotlin', cmake: 'cmake', mk: 'makefile', diff: 'diff', patch: 'diff',
+  sql: 'sql', rb: 'ruby', lua: 'lua', proto: 'protobuf',
+};
+const rawUrl = (p, download) => `${base}/api/files/raw?path=${enc(p)}${download ? '&download=1' : ''}`;
+
+function langOf(name) {
+  if (/^(GNU)?[Mm]akefile$/.test(name)) return 'makefile';
+  if (name === 'CMakeLists.txt') return 'cmake';
+  if (name === 'Dockerfile') return 'dockerfile';
+  return LANG_BY_EXT[name.includes('.') ? name.split('.').pop().toLowerCase() : ''];
+}
+
+function fmtSize(n) {
+  if (n == null) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+
+function fileMsg(text, append = false) {
+  const d = document.createElement('div');
+  d.className = 'fmsg';
+  d.textContent = text;
+  if (!append) $('fbody').innerHTML = '';
+  $('fbody').appendChild(d);
+}
+
+function toggleFiles() {
+  const panel = $('files');
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  setDrawer(false);
+  // 처음 열거나 다른 세션으로 바뀌었으면 그 세션의 현재 폴더부터
+  if (!fb.path || fb.session !== activeName) {
+    fb.session = activeName;
+    listDir(sessions.find((s) => s.name === activeName)?.path || null);
+  }
+}
+
+async function listDir(path) {
+  let r;
+  try {
+    r = await api('GET', `/files/list${path ? `?path=${enc(path)}` : ''}`);
+  } catch (e) {
+    if (fb.path && !fb.file) return toast(e.message, 4000);  // 둘러보던 중이면 그 자리에 머묾
+    if (path) {  // 처음 열 때 세션 폴더를 볼 수 없으면 홈부터
+      toast(e.message, 4000);
+      return listDir(null);
+    }
+    return fileMsg(e.message);
+  }
+  fb.path = r.path;
+  fb.root = r.root;
+  fb.file = null;
+  $('fback').hidden = true;
+  $('ftools').hidden = true;
+  renderCrumb(r.path, false);
+  const ul = document.createElement('ul');
+  ul.className = 'flist';
+  if (r.parent) ul.appendChild(fileRow({ name: '..', dir: true }, r.parent));
+  const items = r.entries.filter((e) => $('fshowhidden').checked || !e.name.startsWith('.'));
+  for (const e of items) ul.appendChild(fileRow(e, `${r.path}/${e.name}`));
+  $('fbody').innerHTML = '';
+  $('fbody').appendChild(ul);
+  if (!items.length) fileMsg('빈 폴더입니다', true);
+  if (r.truncated) fileMsg('항목이 많아 5000개까지만 표시했습니다', true);
+  $('fbody').scrollTop = 0;
+}
+
+function fileRow(e, full) {
+  const li = document.createElement('li');
+  li.innerHTML = '<span class="fic"></span><span class="fn"></span><span class="fm"></span><button class="fins" title="입력창에 경로 넣기">⤶</button>';
+  const icon = e.name === '..' ? '⬆' : e.dir ? '📁' : IMG_EXT.test(e.name) ? '🖼' : MD_EXT.test(e.name) ? '📝' : '📄';
+  li.querySelector('.fic').textContent = icon;
+  li.querySelector('.fn').textContent = e.name + (e.link ? ' ↪' : '');
+  if (!e.dir && e.mtime) li.querySelector('.fm').textContent = `${fmtSize(e.size)} · ${ago(e.mtime)}`;
+  li.onclick = () => (e.dir ? listDir(full) : openFile(full));
+  const ins = li.querySelector('.fins');
+  if (e.name === '..') ins.remove();
+  else ins.onclick = (ev) => { ev.stopPropagation(); insertPath(full); };
+  return li;
+}
+
+function renderCrumb(path, isFile) {
+  const box = $('fcrumb');
+  box.innerHTML = '';
+  const add = (label, target) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (target) b.onclick = () => listDir(target); else b.disabled = true;
+    box.appendChild(b);
+  };
+  const rel = path === fb.root ? '' : path.slice(fb.root.length + 1);
+  const parts = rel ? rel.split('/') : [];
+  add('~', parts.length || isFile ? fb.root : null);
+  let acc = fb.root;
+  parts.forEach((p, i) => {
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '/';
+    box.appendChild(sep);
+    acc += `/${p}`;
+    add(p, i === parts.length - 1 ? null : acc);
+  });
+  box.scrollLeft = box.scrollWidth;
+}
+
+async function openFile(path) {
+  const name = path.split('/').pop();
+  fb.file = path;
+  fb.rawMd = false;
+  renderCrumb(path, true);
+  $('fback').hidden = false;
+  $('ftools').hidden = false;
+  $('fname').textContent = name;
+  $('fdownload').href = rawUrl(path, true);
+  $('fmdtoggle').hidden = !MD_EXT.test(name);
+  if (IMG_EXT.test(name)) {
+    const d = document.createElement('div');
+    d.className = 'fimg';
+    const img = new Image();
+    img.src = rawUrl(path);
+    img.alt = name;
+    d.appendChild(img);
+    $('fbody').innerHTML = '';
+    $('fbody').appendChild(d);
+    return;
+  }
+  fileMsg('불러오는 중…');
+  let r;
+  try {
+    // 라이브러리를 못 불러와도(오프라인 등) 일반 텍스트로는 보여줌
+    [r] = await Promise.all([api('GET', `/files/read?path=${enc(path)}`), loadViewerLibs().catch(() => null)]);
+  } catch (e) {
+    return fileMsg(e.message);
+  }
+  if (fb.file !== path) return;  // 그 사이 다른 파일을 열었음
+  if (r.binary) return fileMsg(`바이너리 파일입니다 (${fmtSize(r.size)}). 내려받기로 확인하세요.`);
+  fb.text = r.text;
+  fb.truncated = r.truncated;
+  renderFile();
+}
+
+function renderFile() {
+  const body = $('fbody');
+  const name = fb.file.split('/').pop();
+  body.innerHTML = '';
+  if (MD_EXT.test(name) && !fb.rawMd && window.marked && window.DOMPurify) {
+    const div = document.createElement('div');
+    div.className = 'md';
+    div.innerHTML = DOMPurify.sanitize(marked.parse(fb.text));
+    fixMdLinks(div, fb.file);
+    if (window.hljs) div.querySelectorAll('pre code').forEach((el) => { try { hljs.highlightElement(el); } catch {} });
+    body.appendChild(div);
+  } else {
+    body.appendChild(codeView(fb.text, MD_EXT.test(name) ? 'markdown' : langOf(name)));
+  }
+  if (fb.truncated) fileMsg('파일이 커서 앞부분 2MB만 표시했습니다', true);
+  $('fmdtoggle').textContent = fb.rawMd ? '문서 보기' : '원문';
+  body.scrollTop = 0;
+}
+
+function codeView(text, lang) {
+  const lines = text.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  const src = lines.join('\n');
+  const wrap = document.createElement('div');
+  wrap.className = 'code';
+  const ln = document.createElement('pre');
+  ln.className = 'ln';
+  ln.textContent = lines.map((_, i) => i + 1).join('\n');
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  code.textContent = src;
+  if (window.hljs && src.length < 500000) {
+    try {
+      const known = lang && hljs.getLanguage(lang);
+      const r = known
+        ? hljs.highlight(src, { language: lang, ignoreIllegals: true })
+        : src.length < 100000 ? hljs.highlightAuto(src) : null;
+      if (r) {
+        code.innerHTML = r.value;  // highlight.js가 원문을 이스케이프한 결과
+        code.className = 'hljs';
+      }
+    } catch {}
+  }
+  pre.appendChild(code);
+  wrap.append(ln, pre);
+  return wrap;
+}
+
+// Markdown 안의 상대 경로 이미지/링크를 파일 탐색 기준으로 바꿈
+function fixMdLinks(div, file) {
+  const dir = file.slice(0, file.lastIndexOf('/'));
+  const isRelative = (u) => u && !/^([a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(u);
+  const resolve = (u) => {
+    let p = u.split('#')[0].split('?')[0];
+    try { p = decodeURI(p); } catch {}
+    const out = [];
+    for (const part of `${dir}/${p}`.split('/')) {
+      if (part === '..') out.pop(); else if (part && part !== '.') out.push(part);
+    }
+    return '/' + out.join('/');
+  };
+  for (const img of div.querySelectorAll('img')) {
+    const src = img.getAttribute('src');
+    if (isRelative(src)) img.src = rawUrl(resolve(src));
+  }
+  for (const a of div.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href');
+    if (href.startsWith('#')) continue;
+    if (isRelative(href)) {
+      const target = resolve(href);
+      a.href = '#';
+      a.onclick = (e) => {
+        e.preventDefault();
+        if (/\.[^/]+$/.test(target)) openFile(target); else listDir(target);
+      };
+    } else {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    }
+  }
+}
+
+function insertPath(p) {
+  // 지금 세션의 작업 폴더 아래면 상대 경로로 짧게
+  const cur = sessions.find((s) => s.name === activeName);
+  let rel = cur?.path && p.startsWith(`${cur.path}/`) ? p.slice(cur.path.length + 1) : p;
+  if (/\s/.test(rel)) rel = `"${rel}"`;
+  setIme(true, false);
+  if (ime.value && !/\s$/.test(ime.value)) ime.value += ' ';
+  ime.value += `${rel} `;
+  autoGrow();
+  toast(`입력창에 넣음: ${rel}`);
+  if (narrow.matches) $('files').hidden = true;  // 폰에서는 바로 입력할 수 있게 닫기
+}
+
+$('filesbtn').onclick = toggleFiles;
+$('fclose').onclick = () => { $('files').hidden = true; };
+$('fback').onclick = () => listDir(fb.path);
+$('finsert').onclick = () => fb.file && insertPath(fb.file);
+$('fmdtoggle').onclick = () => {
+  fb.rawMd = !fb.rawMd;
+  renderFile();
+};
+$('fshowhidden').checked = !!LS.get('fshowHidden', false);
+$('fshowhidden').onchange = () => {
+  LS.set('fshowHidden', $('fshowhidden').checked);
+  if (!fb.file && fb.path) listDir(fb.path);
+};
+
 // ================= 글자 크기 =================
 
 function setFontSize(size) {

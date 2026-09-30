@@ -46,6 +46,7 @@
       <button id="split" class="wide-only" title="여러 세션 동시에 보기">⊞</button>
       <button id="fontdown" class="wide-only" title="글자 작게">A−</button>
       <button id="fontup" class="wide-only" title="글자 크게">A+</button>
+      <button id="filesbtn" title="파일 탐색 (읽기 전용)">📂</button>
       <button id="copymode" title="화면 내용 복사">📋</button>
       <button id="imetoggle" title="한글 입력창 켜기/끄기">가</button>
     </div>
@@ -82,6 +83,23 @@
     </div>
   </main>
   <div id="scrim"></div>
+
+  <!-- 파일 탐색 (읽기 전용) -->
+  <section id="files" hidden>
+    <header class="fhead">
+      <button id="fback" title="목록으로" hidden>←</button>
+      <div id="fcrumb"></div>
+      <label class="fhidden" title="숨김 파일 보기"><input type="checkbox" id="fshowhidden">숨김</label>
+      <button id="fclose" title="닫기">✕</button>
+    </header>
+    <div id="ftools" hidden>
+      <span id="fname"></span>
+      <button id="fmdtoggle" hidden>원문</button>
+      <button id="finsert" title="입력창에 경로 넣기">경로 넣기</button>
+      <a id="fdownload" class="btn" download>내려받기</a>
+    </div>
+    <div id="fbody"></div>
+  </section>
 </div>
 
 <!-- 새 세션 -->

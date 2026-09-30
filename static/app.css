@@ -153,6 +153,52 @@ dialog.big[open] { display:flex; flex-direction:column; }
 #scrim { display:none; }
 #app.collapsed aside { display:none; }
 
+/* ---- 파일 탐색 ---- */
+#files { position:fixed; top:0; right:0; width:min(50vw, 860px); height:var(--app-h, 100dvh); z-index:30; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; box-shadow:-4px 0 24px rgba(0,0,0,.35); padding-top:env(safe-area-inset-top); }
+#files[hidden] { display:none; }
+.fhead { display:flex; gap:6px; align-items:center; padding:8px; border-bottom:1px solid var(--line); }
+#fcrumb { flex:1; min-width:0; display:flex; align-items:center; overflow-x:auto; white-space:nowrap; font-size:13px; scrollbar-width:none; }
+#fcrumb button { border:0; background:none; padding:2px 3px; color:var(--accent); }
+#fcrumb button:disabled { color:var(--fg); cursor:default; font-weight:600; }
+#fcrumb .sep { color:var(--dim); }
+.fhidden { flex:none; display:flex; align-items:center; gap:4px; font-size:12px; color:var(--dim); cursor:pointer; }
+#ftools { display:flex; gap:6px; align-items:center; padding:6px 8px; border-bottom:1px solid var(--line); }
+#ftools[hidden] { display:none; }
+#fname { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+a.btn { background:#34373d; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 10px; text-decoration:none; font-size:14px; }
+a.btn:hover { border-color:var(--accent); }
+#fbody { flex:1; min-height:0; overflow:auto; }
+.flist { list-style:none; margin:0; padding:4px; }
+.flist li { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; cursor:pointer; }
+.flist li:hover { background:#2f3237; }
+.flist .fic { flex:none; width:1.3em; text-align:center; }
+.flist .fn { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.flist .fm { flex:none; color:var(--dim); font-size:12px; }
+.flist .fins { visibility:hidden; padding:0 7px; font-size:12px; }
+.flist li:hover .fins { visibility:visible; }
+@media (hover:none) { .flist .fins { visibility:visible; } }
+.fmsg { padding:24px; color:var(--dim); text-align:center; }
+.fimg { padding:12px; text-align:center; }
+.fimg img { max-width:100%; background:repeating-conic-gradient(#2a2c30 0 25%, #222428 0 50%) 0 0/16px 16px; }
+/* 코드 보기: 줄 번호 + 문법 색상 */
+.code { display:flex; min-width:max-content; font:12.5px/1.55 ui-monospace, "D2Coding", monospace; }
+.code pre { margin:0; padding:8px 14px 8px 10px; }
+.code .ln { position:sticky; left:0; text-align:right; color:#5c6370; background:var(--panel); border-right:1px solid var(--line); user-select:none; -webkit-user-select:none; padding:8px 8px 8px 10px; }
+.code code.hljs { background:none; padding:0; }
+/* Markdown 문서 보기 */
+.md { padding:16px 22px 40px; max-width:920px; line-height:1.7; font-size:14.5px; overflow-wrap:anywhere; }
+.md h1, .md h2 { border-bottom:1px solid var(--line); padding-bottom:.3em; }
+.md a { color:var(--accent); }
+.md code { background:#1f2124; padding:1px 5px; border-radius:4px; font:.9em ui-monospace, monospace; }
+.md pre { background:#1f2124; padding:12px 14px; border-radius:6px; overflow:auto; line-height:1.5; }
+.md pre code { background:none; padding:0; }
+.md table { border-collapse:collapse; display:block; overflow:auto; }
+.md th, .md td { border:1px solid var(--line); padding:5px 10px; }
+.md th { background:#2a2c31; }
+.md img { max-width:100%; }
+.md blockquote { margin:0; padding-left:14px; border-left:3px solid var(--line); color:var(--dim); }
+.md hr { border:0; border-top:1px solid var(--line); }
+
 /* 터치 기기: 특수키 줄 표시 */
 @media (max-width:768px), (pointer:coarse) { #keys { display:flex; } }
 
@@ -168,4 +214,5 @@ dialog.big[open] { display:flex; flex-direction:column; }
   #ime { font-size:16px; }  /* iOS: 16px 미만이면 포커스 시 화면 확대됨 */
   #sessions li { padding:12px 10px; }
   dialog input, dialog select { font-size:16px; }
+  #files { width:100%; border-left:0; }
 }

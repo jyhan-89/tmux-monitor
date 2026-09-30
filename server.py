@@ -40,6 +40,9 @@ COOKIE = "tmuxweb_session"
 LOOPBACK = {"127.0.0.1", "::1"}
 LOCAL_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 MAX_UPLOAD = 200 * 1024 * 1024
+# 파일 탐색으로 볼 수 있는 범위 (이 폴더 밖은 거부, 읽기 전용)
+FILES_ROOT = Path(os.environ.get("TMUX_WEB_FILES_ROOT", "~")).expanduser().resolve()
+MAX_TEXT = 2 * 1024 * 1024  # 텍스트 보기 최대 크기
 
 
 @asynccontextmanager
@@ -396,6 +399,95 @@ def api_move_session(name: str, body: MoveGroup):
     except KeyError as e:
         raise HTTPException(404, e.args[0])
     return {"ok": True}
+
+
+# ---------- 파일 탐색 (읽기 전용) ----------
+
+def safe_path(path: str | None) -> Path:
+    """FILES_ROOT 안의 실제 경로로 변환. 심볼릭 링크로 밖을 가리켜도 거부."""
+    p = Path(os.path.expanduser(path or str(FILES_ROOT)))
+    if not p.is_absolute():
+        p = FILES_ROOT / p
+    try:
+        real = p.resolve(strict=True)
+    except (FileNotFoundError, RuntimeError):
+        raise HTTPException(404, "파일이나 폴더가 없습니다")
+    if not real.is_relative_to(FILES_ROOT):
+        raise HTTPException(403, f"{FILES_ROOT} 밖은 볼 수 없습니다")
+    return real
+
+
+@api.get("/files/list")
+def api_files_list(path: str | None = None):
+    d = safe_path(path)
+    if not d.is_dir():
+        raise HTTPException(400, "폴더가 아닙니다")
+    entries = []
+    try:
+        items = list(os.scandir(d))
+    except PermissionError:
+        raise HTTPException(403, "폴더를 읽을 권한이 없습니다")
+    for e in items[:5000]:
+        try:
+            st = e.stat()  # 링크는 대상 기준
+            is_dir = e.is_dir()
+        except OSError:  # 깨진 링크 등
+            st, is_dir = None, False
+        entries.append({
+            "name": e.name,
+            "dir": is_dir,
+            "link": e.is_symlink(),
+            "size": st.st_size if st and not is_dir else None,
+            "mtime": int(st.st_mtime) if st else None,
+        })
+    entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
+    return {
+        "path": str(d),
+        "root": str(FILES_ROOT),
+        "parent": str(d.parent) if d != FILES_ROOT else None,
+        "entries": entries,
+        "truncated": len(items) > 5000,
+    }
+
+
+def decode_text(data: bytes) -> str:
+    for enc in ("utf-8", "cp949"):  # 예전 한글 소스(EUC-KR)도 읽도록
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
+@api.get("/files/read")
+def api_files_read(path: str):
+    f = safe_path(path)
+    if not f.is_file():
+        raise HTTPException(400, "파일이 아닙니다")
+    size = f.stat().st_size
+    try:
+        with open(f, "rb") as fh:
+            data = fh.read(MAX_TEXT)
+    except PermissionError:
+        raise HTTPException(403, "파일을 읽을 권한이 없습니다")
+    if b"\x00" in data[:8192]:
+        return {"path": str(f), "size": size, "binary": True}
+    return {"path": str(f), "size": size, "binary": False, "truncated": size > MAX_TEXT, "text": decode_text(data)}
+
+
+@api.get("/files/raw")
+def api_files_raw(path: str, download: bool = False):
+    f = safe_path(path)
+    if not f.is_file():
+        raise HTTPException(400, "파일이 아닙니다")
+    headers = {
+        # 홈 폴더의 HTML/SVG가 이 사이트 권한으로 스크립트를 실행하지 못하게
+        "Content-Security-Policy": "sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if download:
+        return FileResponse(f, filename=f.name, headers=headers)
+    return FileResponse(f, headers=headers, content_disposition_type="inline", filename=f.name)
 
 
 # ---------- 설정 (명령 버튼 / 폴더 추천) ----------
