@@ -3,5 +3,6 @@ fastapi==0.141.1
 py-vapid==1.9.4
 python-multipart==0.0.32
 pywebpush==2.5.0
+Send2Trash==2.1.0
 uvicorn==0.54.0
 websockets==17.1

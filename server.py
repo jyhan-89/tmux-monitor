@@ -26,6 +26,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from send2trash import send2trash
 
 import auth
 import push
@@ -442,6 +443,7 @@ def api_files_list(path: str | None = None):
         "parent": str(d.parent) if d != FILES_ROOT else None,
         "entries": entries,
         "truncated": len(items) > 5000,
+        "file_edit": file_edit_enabled(),
     }
 
 
@@ -529,6 +531,149 @@ def api_files_write(body: FileWrite):
         if fd is not None and os.path.exists(tmp):
             os.unlink(tmp)
     return {"mtime": f.stat().st_mtime_ns, "size": len(data)}
+
+
+def require_file_edit() -> None:
+    if not file_edit_enabled():
+        raise HTTPException(403, "파일 수정이 꺼져 있습니다. 서버 PC의 설정 화면(/dev/setup)에서 켤 수 있습니다")
+
+
+def valid_entry_name(name: str) -> str:
+    name = name.strip()
+    if not name or name in (".", "..") or "/" in name or "\x00" in name or len(name.encode()) > 255:
+        raise HTTPException(400, "사용할 수 없는 이름입니다")
+    return name
+
+
+def safe_entry(path: str) -> Path:
+    p = Path(os.path.expanduser(path))
+    if not p.is_absolute():
+        p = FILES_ROOT / p
+    parent = safe_path(str(p.parent))
+    entry = parent / p.name
+    if not os.path.lexists(entry):
+        raise HTTPException(404, "파일이나 폴더가 없습니다")
+    if entry == FILES_ROOT or p.name in ("", ".", ".."):
+        raise HTTPException(403, "이 폴더는 바꿀 수 없습니다")
+    return entry
+
+
+def unique_path(folder: Path, name: str) -> Path:
+    dest = folder / name
+    stem, suffix = (name, "") if name.startswith(".") and name.count(".") == 1 else (Path(name).stem, Path(name).suffix)
+    n = 1
+    while os.path.lexists(dest):
+        dest = folder / (f"{stem} ({n}){suffix}" if n > 1 else f"{stem} (복사본){suffix}")
+        n += 1
+    return dest
+
+
+class NewEntry(BaseModel):
+    folder: str
+    name: str
+    kind: str
+
+
+@api.post("/files/new")
+def api_files_new(body: NewEntry):
+    require_file_edit()
+    folder = safe_path(body.folder)
+    if not folder.is_dir():
+        raise HTTPException(400, "폴더가 아닙니다")
+    dest = folder / valid_entry_name(body.name)
+    if os.path.lexists(dest):
+        raise HTTPException(409, "같은 이름이 이미 있습니다")
+    try:
+        if body.kind == "dir":
+            dest.mkdir()
+        elif body.kind == "file":
+            dest.touch(exist_ok=False)
+        else:
+            raise HTTPException(400, "kind는 file 또는 dir")
+    except PermissionError:
+        raise HTTPException(403, "쓰기 권한이 없습니다")
+    return {"path": str(dest)}
+
+
+class RenameEntry(BaseModel):
+    path: str
+    new_name: str
+
+
+@api.post("/files/rename")
+def api_files_rename(body: RenameEntry):
+    require_file_edit()
+    src = safe_entry(body.path)
+    dest = src.parent / valid_entry_name(body.new_name)
+    if dest == src:
+        return {"path": str(dest)}
+    if os.path.lexists(dest):
+        raise HTTPException(409, "같은 이름이 이미 있습니다")
+    try:
+        os.rename(src, dest)
+    except PermissionError:
+        raise HTTPException(403, "쓰기 권한이 없습니다")
+    return {"path": str(dest)}
+
+
+class Transfer(BaseModel):
+    paths: list[str]
+    dest: str
+    mode: str
+
+
+@api.post("/files/transfer")
+def api_files_transfer(body: Transfer):
+    require_file_edit()
+    if body.mode not in ("copy", "move"):
+        raise HTTPException(400, "mode는 copy 또는 move")
+    folder = safe_path(body.dest)
+    if not folder.is_dir():
+        raise HTTPException(400, "대상이 폴더가 아닙니다")
+    done, failed = [], []
+    for raw in body.paths[:500]:
+        try:
+            src = safe_entry(raw)
+            if src.is_dir() and not src.is_symlink() and (folder == src or folder.is_relative_to(src)):
+                raise HTTPException(400, "폴더를 자기 자신 안으로 옮기거나 복사할 수 없습니다")
+            if body.mode == "move":
+                if src.parent == folder:
+                    continue
+                dest = folder / src.name
+                if os.path.lexists(dest):
+                    raise HTTPException(409, "같은 이름이 이미 있습니다")
+                shutil.move(str(src), str(dest))
+            else:
+                dest = unique_path(folder, src.name)
+                if src.is_dir() and not src.is_symlink():
+                    shutil.copytree(src, dest, symlinks=True)
+                else:
+                    shutil.copy2(src, dest, follow_symlinks=False)
+            done.append(str(dest))
+        except HTTPException as e:
+            failed.append({"path": raw, "error": e.detail})
+        except OSError as e:
+            failed.append({"path": raw, "error": e.strerror or str(e)})
+    return {"done": done, "failed": failed}
+
+
+class DeleteEntries(BaseModel):
+    paths: list[str]
+
+
+@api.post("/files/delete")
+def api_files_delete(body: DeleteEntries):
+    require_file_edit()
+    done, failed = [], []
+    for raw in body.paths[:500]:
+        try:
+            send2trash(str(safe_entry(raw)))
+            done.append(raw)
+        except HTTPException as e:
+            failed.append({"path": raw, "error": e.detail})
+        except OSError as e:
+            failed.append({"path": raw, "error": e.strerror or str(e)})
+    return {"done": done, "failed": failed}
 
 
 @api.get("/files/raw")

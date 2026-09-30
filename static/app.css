@@ -165,9 +165,18 @@ a.btn:hover { border-color:var(--accent); }
 .flist .fic { flex:none; width:1.3em; text-align:center; }
 .flist .fn { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .flist .fm { flex:none; color:var(--dim); font-size:12px; }
-.flist .fins { visibility:hidden; padding:0 7px; font-size:12px; }
-.flist li:hover .fins { visibility:visible; }
-@media (hover:none) { .flist .fins { visibility:visible; } }
+.flist li { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+.flist .fmore { visibility:hidden; padding:0 8px; font-size:13px; }
+.flist li:hover .fmore { visibility:visible; }
+@media (hover:none) { .flist .fmore { visibility:visible; } }
+#fmenu[hidden] { display:none; }
+#ctxmenu { position:fixed; z-index:70; min-width:210px; max-width:calc(100vw - 8px); padding:4px; background:#2b2d31; border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.5); }
+#ctxmenu[hidden] { display:none; }
+.ctxi { display:block; width:100%; text-align:left; border:0; background:none; padding:8px 12px; border-radius:5px; font-size:14px; }
+.ctxi:hover:not(:disabled) { background:#3a3d44; }
+.ctxi:disabled { opacity:.4; cursor:default; }
+.ctxi.danger { color:var(--err); }
+.ctxsep { height:1px; margin:4px 2px; background:var(--line); }
 .fmsg { padding:24px; color:var(--dim); text-align:center; }
 .fimg { padding:12px; text-align:center; }
 .fimg img { max-width:100%; background:repeating-conic-gradient(#2a2c30 0 25%, #222428 0 50%) 0 0/16px 16px; }

@@ -1154,6 +1154,8 @@ async function listDir(path) {
   fb.path = r.path;
   fb.root = r.root;
   fb.file = null;
+  fb.fileEdit = r.file_edit;
+  $('fmenu').hidden = false;
   $('fback').hidden = true;
   $('ftools').hidden = true;
   renderCrumb(r.path, false);
@@ -1171,17 +1173,236 @@ async function listDir(path) {
 
 function fileRow(e, full) {
   const li = document.createElement('li');
-  li.innerHTML = '<span class="fic"></span><span class="fn"></span><span class="fm"></span><button class="fins" title="입력창에 경로 넣기">⤶</button>';
+  li.innerHTML = '<span class="fic"></span><span class="fn"></span><span class="fm"></span><button class="fmore" title="메뉴">⋯</button>';
   const icon = e.name === '..' ? '⬆' : e.dir ? '📁' : IMG_EXT.test(e.name) ? '🖼' : MD_EXT.test(e.name) ? '📝' : '📄';
   li.querySelector('.fic').textContent = icon;
   li.querySelector('.fn').textContent = e.name + (e.link ? ' ↪' : '');
   if (!e.dir && e.mtime) li.querySelector('.fm').textContent = `${fmtSize(e.size)} · ${ago(e.mtime)}`;
-  li.onclick = () => (e.dir ? listDir(full) : openFile(full));
-  const ins = li.querySelector('.fins');
-  if (e.name === '..') ins.remove();
-  else ins.onclick = (ev) => { ev.stopPropagation(); insertPath(full); };
+  li.onclick = () => {
+    if (li.dataset.longpress) {
+      delete li.dataset.longpress;
+      return;
+    }
+    if (e.dir) listDir(full); else openFile(full);
+  };
+  const more = li.querySelector('.fmore');
+  if (e.name === '..') {
+    more.remove();
+    return li;
+  }
+  more.onclick = (ev) => {
+    ev.stopPropagation();
+    const r = more.getBoundingClientRect();
+    openCtx(r.right, r.bottom, entryMenu(e, full));
+  };
+  li.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openCtx(ev.clientX, ev.clientY, entryMenu(e, full));
+  });
+  let timer = null;
+  let x0 = 0;
+  let y0 = 0;
+  li.addEventListener('touchstart', (ev) => {
+    x0 = ev.touches[0].clientX;
+    y0 = ev.touches[0].clientY;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      li.dataset.longpress = '1';
+      navigator.vibrate?.(20);
+      openCtx(x0, y0, entryMenu(e, full));
+    }, 500);
+  }, { passive: true });
+  li.addEventListener('touchmove', (ev) => {
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - x0, t.clientY - y0) > 10) clearTimeout(timer);
+  }, { passive: true });
+  li.addEventListener('touchend', (ev) => {
+    clearTimeout(timer);
+    if (li.dataset.longpress) {
+      ev.preventDefault();
+      delete li.dataset.longpress;
+    }
+  }, { passive: false });
+  li.addEventListener('touchcancel', () => clearTimeout(timer));
   return li;
 }
+
+const ctx = { clip: null };
+
+function closeCtx() {
+  $('ctxmenu').hidden = true;
+}
+
+function openCtx(x, y, items) {
+  const m = $('ctxmenu');
+  m.innerHTML = '';
+  for (const it of items) {
+    if (it === '-') {
+      const sep = document.createElement('div');
+      sep.className = 'ctxsep';
+      m.appendChild(sep);
+      continue;
+    }
+    const b = document.createElement('button');
+    b.className = `ctxi${it.danger ? ' danger' : ''}`;
+    b.textContent = it.label;
+    if (it.disabled) {
+      b.disabled = true;
+      if (typeof it.disabled === 'string') b.title = it.disabled;
+    }
+    b.onclick = () => {
+      closeCtx();
+      it.run();
+    };
+    m.appendChild(b);
+  }
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(4, Math.min(x, innerWidth - r.width - 4))}px`;
+  m.style.top = `${Math.max(4, Math.min(y, innerHeight - r.height - 4))}px`;
+}
+
+const editOff = () => (fb.fileEdit ? false : '서버 설정에서 파일 수정을 켜야 합니다');
+const baseName = (p) => p.split('/').pop();
+
+function clipLabel() {
+  const { paths } = ctx.clip;
+  return paths.length > 1 ? `${baseName(paths[0])} 외 ${paths.length - 1}개` : baseName(paths[0]);
+}
+
+function entryMenu(e, full) {
+  const off = editOff();
+  const items = [
+    { label: '열기', run: () => (e.dir ? listDir(full) : openFile(full)) },
+    { label: '입력창에 경로 넣기', run: () => insertPath(full) },
+    { label: '경로 복사', run: () => copyText(full).then((ok) => toast(ok ? '경로를 복사했습니다' : '복사 실패')) },
+  ];
+  if (!e.dir) items.push({ label: '내려받기', run: () => downloadFile(full) });
+  items.push('-',
+    { label: '복사', disabled: off, run: () => setClip('copy', full) },
+    { label: '잘라내기', disabled: off, run: () => setClip('move', full) });
+  if (e.dir && ctx.clip) items.push({ label: `여기에 붙여넣기 (${clipLabel()})`, disabled: off, run: () => pasteInto(full) });
+  if (!e.dir) items.push({ label: '복제', disabled: off, run: () => transfer([full], fb.path, 'copy') });
+  items.push(
+    { label: '이름 바꾸기', disabled: off, run: () => renameEntry(full) },
+    '-',
+    { label: '삭제 (휴지통으로)', danger: true, disabled: off, run: () => deleteEntry(full) },
+  );
+  return items;
+}
+
+function folderMenu() {
+  const off = editOff();
+  return [
+    { label: '새 파일', disabled: off, run: () => newEntry('file') },
+    { label: '새 폴더', disabled: off, run: () => newEntry('dir') },
+    {
+      label: ctx.clip ? `붙여넣기 (${clipLabel()})` : '붙여넣기',
+      disabled: off || (!ctx.clip && '복사하거나 잘라낸 항목이 없습니다'),
+      run: () => pasteInto(fb.path),
+    },
+    '-',
+    { label: '입력창에 이 폴더 경로 넣기', run: () => insertPath(fb.path) },
+    { label: '새로고침', run: () => listDir(fb.path) },
+  ];
+}
+
+function setClip(mode, path) {
+  ctx.clip = { mode, paths: [path] };
+  toast(`${mode === 'copy' ? '복사' : '잘라내기'}: ${baseName(path)} · 붙여넣을 폴더의 메뉴에서 '붙여넣기'`, 4000);
+}
+
+async function pasteInto(dir) {
+  if (!ctx.clip) return;
+  const { mode, paths } = ctx.clip;
+  if (await transfer(paths, dir, mode) && mode === 'move') ctx.clip = null;
+}
+
+function reportFailures(r, verb) {
+  if (r.failed?.length) {
+    toast(`${verb} 실패: ${r.failed.map((f) => `${baseName(f.path)} (${f.error})`).join(', ')}`, 6000);
+    return false;
+  }
+  return true;
+}
+
+async function transfer(paths, dest, mode) {
+  let r;
+  try {
+    r = await api('POST', '/files/transfer', { paths, dest, mode });
+  } catch (e) {
+    toast(e.message, 5000);
+    return false;
+  }
+  const ok = reportFailures(r, mode === 'copy' ? '복사' : '이동');
+  if (ok && r.done.length) toast(`${mode === 'copy' ? '복사' : '이동'} 완료: ${r.done.map(baseName).join(', ')}`);
+  listDir(fb.path);
+  return ok;
+}
+
+async function renameEntry(full) {
+  const name = prompt('새 이름', baseName(full));
+  if (!name || name === baseName(full)) return;
+  try {
+    await api('POST', '/files/rename', { path: full, new_name: name });
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  if (ctx.clip?.paths.includes(full)) ctx.clip = null;
+  listDir(fb.path);
+}
+
+async function deleteEntry(full) {
+  if (!confirm(`'${baseName(full)}'을(를) 휴지통으로 옮길까요?`)) return;
+  let r;
+  try {
+    r = await api('POST', '/files/delete', { paths: [full] });
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  if (reportFailures(r, '삭제')) toast(`휴지통으로 옮겼습니다: ${baseName(full)}`);
+  if (ctx.clip?.paths.includes(full)) ctx.clip = null;
+  listDir(fb.path);
+}
+
+async function newEntry(kind) {
+  const name = prompt(kind === 'dir' ? '새 폴더 이름' : '새 파일 이름');
+  if (!name?.trim()) return;
+  let r;
+  try {
+    r = await api('POST', '/files/new', { folder: fb.path, name: name.trim(), kind });
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  if (kind === 'dir') return listDir(fb.path);
+  await openFile(r.path);
+  startEdit();
+}
+
+function downloadFile(path) {
+  const a = document.createElement('a');
+  a.href = rawUrl(path, true);
+  a.download = baseName(path);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+document.addEventListener('mousedown', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, true);
+document.addEventListener('touchstart', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, { capture: true, passive: true });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
+window.addEventListener('resize', closeCtx);
+$('fbody').addEventListener('scroll', closeCtx);
+$('fbody').addEventListener('contextmenu', (e) => {
+  if (fb.file || !fb.path) return;
+  e.preventDefault();
+  openCtx(e.clientX, e.clientY, folderMenu());
+});
+$('fmenu').onclick = () => {
+  const r = $('fmenu').getBoundingClientRect();
+  openCtx(r.right, r.bottom, folderMenu());
+};
 
 function renderCrumb(path, isFile) {
   const box = $('fcrumb');
@@ -1216,6 +1437,7 @@ async function openFile(path) {
   setEditUI(false);
   renderCrumb(path, true);
   $('fback').hidden = false;
+  $('fmenu').hidden = true;
   $('ftools').hidden = false;
   $('fname').textContent = name;
   $('fdownload').href = rawUrl(path, true);
