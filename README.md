@@ -4,6 +4,8 @@
 
 A self-hosted web UI to monitor and attach to local tmux sessions from any browser (desktop & mobile),
 with Claude Code status detection and push notifications.
+For remote access, use a VPN such as Tailscale — never expose it directly to the internet
+(see [외부에서 접속하기](#외부에서-접속하기-tailscale-등)).
 Free for personal, educational, research and other noncommercial use — see [License](#license).
 
 - 세션 목록/미리보기, Claude Code 상태(작업 중·확인 필요·대기) 표시와 푸시 알림
@@ -46,6 +48,49 @@ python3 -m venv .venv
 
 - 서버 PC에서 localhost 주소로 접속했을 때만 허용 (외부 IP, 프록시 헤더 위조, DNS 리바인딩 차단)
 - 터미널에서는 `.venv/bin/python auth.py [아이디]` 로도 설정 가능
+
+## 외부에서 접속하기 (Tailscale 등)
+
+기본 설치는 같은 네트워크(사내망, 집 와이파이)에서만 접속된다. 밖에서 쓰려면 **VPN을 거쳐 접속**한다.
+
+> ⚠️ 공유기 포트포워딩 등으로 이 서비스를 **인터넷에 직접 열지 말 것.** 로그인이 있지만 브라우저에서 셸을 여는 도구이므로,
+> 노출되면 비밀번호 대입 공격 등의 표적이 된다.
+
+### Tailscale (추천)
+
+[Tailscale](https://tailscale.com)은 내 기기끼리 암호화된 사설 네트워크를 만들어 주는 무료 VPN이다(개인 사용 무료).
+서버 PC와 폰/노트북에 설치하고 같은 계정으로 로그인하면, 어디서든 서버의 Tailscale IP(`100.x.y.z`)로 접속된다.
+
+```bash
+# 서버 PC (Linux)
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+tailscale ip -4          # 100.x.y.z
+```
+
+- 기본 설치(로컬 네트워크 서버): `http://100.x.y.z:8765/dev`
+- `--https` 설치: `https://100.x.y.z/dev` (자체 인증서의 CA를 기기에 설치. 설치 스크립트가 Tailscale IP도 인증서에 넣는다)
+
+**Tailscale Serve로 HTTPS 쓰기 (인증서 설치 불필요)**
+
+Tailscale이 `https://<기기이름>.<tailnet>.ts.net` 주소로 정식 인증서(Let's Encrypt)를 붙여 준다.
+기기마다 CA를 설치하지 않아도 푸시 알림, 붙여넣기 버튼, 홈 화면 앱을 쓸 수 있다.
+
+```bash
+# 관리 콘솔에서 MagicDNS와 HTTPS Certificates를 켠 뒤 (처음 실행 시 안내 링크가 나옴)
+sudo tailscale serve --bg http://127.0.0.1:8765
+# 접속: https://<기기이름>.<tailnet>.ts.net/dev   (끄기: sudo tailscale serve reset)
+```
+
+- tailnet(내 Tailscale 기기)에서만 열리고 인터넷에는 공개되지 않는다.
+- `--https` 설치(nginx가 443 사용)와 함께 쓰면 Tailscale IP의 443 포트가 겹친다. 둘 중 하나만 쓴다.
+- 발급된 인증서의 기기 이름(`*.ts.net`)은 인증서 투명성(CT) 공개 기록에 남는다.
+
+### 그 밖의 방법
+
+- **회사/학교 VPN**: VPN으로 내부망에 들어온 뒤 내부 IP로 접속
+- **WireGuard** 등 직접 구성한 VPN
+- **SSH 터널** (임시로 쓸 때): `ssh -L 8765:127.0.0.1:8765 user@서버` 후 내 PC에서 `http://localhost:8765/dev`
 
 ## 배포 (deploy/)
 

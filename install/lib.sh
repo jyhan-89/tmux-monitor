@@ -151,5 +151,10 @@ summary() {
     local)
       info "http://localhost:$PORT/dev" ;;
   esac
+  if [[ $MODE != local ]]; then
+    echo
+    info "밖에서 접속하려면 Tailscale 같은 VPN을 쓰세요 (README '외부에서 접속하기')."
+    info "공유기 포트포워딩으로 인터넷에 직접 열지 마세요."
+  fi
   [[ -f "$CONFIG_DIR/auth.json" ]] || warn "계정 만들기: 이 PC에서 http://localhost:$PORT/dev/setup"
 }
