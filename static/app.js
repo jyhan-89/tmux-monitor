@@ -1151,6 +1151,7 @@ async function listDir(path) {
     }
     return fileMsg(e.message);
   }
+  const samePath = fb.path === r.path;
   fb.path = r.path;
   fb.root = r.root;
   fb.file = null;
@@ -1161,44 +1162,119 @@ async function listDir(path) {
   renderCrumb(r.path, false);
   const ul = document.createElement('ul');
   ul.className = 'flist';
+  if (!samePath) clearSel();
+  const keep = new Set(sel.paths);
+  sel.rows = [];
+  sel.paths.clear();
   if (r.parent) ul.appendChild(fileRow({ name: '..', dir: true }, r.parent));
   const items = r.entries.filter((e) => $('fshowhidden').checked || !e.name.startsWith('.'));
   for (const e of items) ul.appendChild(fileRow(e, `${r.path}/${e.name}`));
   $('fbody').innerHTML = '';
   $('fbody').appendChild(ul);
+  for (const row of sel.rows) if (keep.has(row.full)) sel.paths.add(row.full);
+  updateSel();
   if (!items.length) fileMsg('빈 폴더입니다', true);
   if (r.truncated) fileMsg('항목이 많아 5000개까지만 표시했습니다', true);
   $('fbody').scrollTop = 0;
 }
 
+const sel = { paths: new Set(), sticky: false, last: null, rows: [] };
+
+function selecting() {
+  return sel.sticky || sel.paths.size > 0;
+}
+
+function updateSel() {
+  const n = sel.paths.size;
+  $('files').classList.toggle('selecting', selecting());
+  for (const row of sel.rows) {
+    const on = sel.paths.has(row.full);
+    row.li.classList.toggle('selected', on);
+    row.box.checked = on;
+  }
+  $('fselbar').hidden = !selecting() || !!fb.file;
+  $('fselcount').textContent = `${n}개 선택`;
+  const off = !fb.fileEdit;
+  for (const act of ['copy', 'cut', 'delete']) {
+    const b = $('fselbar').querySelector(`[data-act="${act}"]`);
+    b.disabled = !n || off;
+    b.title = off ? '서버 설정에서 파일 수정을 켜야 합니다' : '';
+  }
+  $('fselbar').querySelector('[data-act="insert"]').disabled = !n;
+}
+
+function clearSel() {
+  sel.paths.clear();
+  sel.sticky = false;
+  sel.last = null;
+  updateSel();
+}
+
+function toggleSel(idx) {
+  const { full } = sel.rows[idx];
+  if (sel.paths.has(full)) sel.paths.delete(full); else sel.paths.add(full);
+  sel.last = idx;
+  updateSel();
+}
+
+function rangeSel(idx) {
+  const from = sel.last ?? idx;
+  const [a, b] = from < idx ? [from, idx] : [idx, from];
+  for (let i = a; i <= b; i++) sel.paths.add(sel.rows[i].full);
+  updateSel();
+}
+
+function selectAll() {
+  for (const row of sel.rows) sel.paths.add(row.full);
+  updateSel();
+}
+
 function fileRow(e, full) {
   const li = document.createElement('li');
-  li.innerHTML = '<span class="fic"></span><span class="fn"></span><span class="fm"></span><button class="fmore" title="메뉴">⋯</button>';
+  li.innerHTML = '<input type="checkbox" class="fsel" tabindex="-1"><span class="fic"></span><span class="fn"></span><span class="fm"></span><button class="fmore" title="메뉴">⋯</button>';
   const icon = e.name === '..' ? '⬆' : e.dir ? '📁' : IMG_EXT.test(e.name) ? '🖼' : MD_EXT.test(e.name) ? '📝' : '📄';
   li.querySelector('.fic').textContent = icon;
   li.querySelector('.fn').textContent = e.name + (e.link ? ' ↪' : '');
   if (!e.dir && e.mtime) li.querySelector('.fm').textContent = `${fmtSize(e.size)} · ${ago(e.mtime)}`;
-  li.onclick = () => {
+  const box = li.querySelector('.fsel');
+  const more = li.querySelector('.fmore');
+  if (e.name === '..') {
+    box.remove();
+    more.remove();
+    li.onclick = () => listDir(full);
+    return li;
+  }
+  const idx = sel.rows.length;
+  sel.rows.push({ e, full, li, box });
+
+  li.onclick = (ev) => {
     if (li.dataset.longpress) {
       delete li.dataset.longpress;
       return;
     }
+    if (ev.shiftKey && sel.last !== null) return rangeSel(idx);
+    if (ev.ctrlKey || ev.metaKey || selecting()) return toggleSel(idx);
     if (e.dir) listDir(full); else openFile(full);
   };
-  const more = li.querySelector('.fmore');
-  if (e.name === '..') {
-    more.remove();
-    return li;
-  }
+  box.onclick = (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    if (ev.shiftKey && sel.last !== null) rangeSel(idx); else toggleSel(idx);
+  };
+  const menuFor = () => {
+    if (sel.paths.size > 1 && sel.paths.has(full)) return bulkMenu([...sel.paths]);
+    if (!sel.paths.has(full) && !sel.sticky) clearSel();
+    return entryMenu(e, full, idx);
+  };
   more.onclick = (ev) => {
     ev.stopPropagation();
     const r = more.getBoundingClientRect();
-    openCtx(r.right, r.bottom, entryMenu(e, full));
+    openCtx(r.right, r.bottom, menuFor());
   };
   li.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    openCtx(ev.clientX, ev.clientY, entryMenu(e, full));
+    openCtx(ev.clientX, ev.clientY, menuFor());
   });
   let timer = null;
   let x0 = 0;
@@ -1210,7 +1286,7 @@ function fileRow(e, full) {
     timer = setTimeout(() => {
       li.dataset.longpress = '1';
       navigator.vibrate?.(20);
-      openCtx(x0, y0, entryMenu(e, full));
+      openCtx(x0, y0, menuFor());
     }, 500);
   }, { passive: true });
   li.addEventListener('touchmove', (ev) => {
@@ -1271,10 +1347,17 @@ function clipLabel() {
   return paths.length > 1 ? `${baseName(paths[0])} 외 ${paths.length - 1}개` : baseName(paths[0]);
 }
 
-function entryMenu(e, full) {
+function entryMenu(e, full, idx) {
   const off = editOff();
   const items = [
     { label: '열기', run: () => (e.dir ? listDir(full) : openFile(full)) },
+    {
+      label: '선택',
+      run: () => {
+        sel.sticky = true;
+        if (!sel.paths.has(full)) toggleSel(idx); else updateSel();
+      },
+    },
     { label: '입력창에 경로 넣기', run: () => insertPath(full) },
     { label: '경로 복사', run: () => copyText(full).then((ok) => toast(ok ? '경로를 복사했습니다' : '복사 실패')) },
   ];
@@ -1292,9 +1375,35 @@ function entryMenu(e, full) {
   return items;
 }
 
+function bulkMenu(paths) {
+  const off = editOff();
+  return [
+    { label: `${paths.length}개 선택됨`, disabled: true, run() {} },
+    { label: '입력창에 경로 넣기', run: () => insertPaths(paths) },
+    { label: '경로 복사', run: () => copyText(paths.join('\n')).then((ok) => toast(ok ? `경로 ${paths.length}개를 복사했습니다` : '복사 실패')) },
+    '-',
+    { label: '복사', disabled: off, run: () => setClip('copy', paths) },
+    { label: '잘라내기', disabled: off, run: () => setClip('move', paths) },
+    '-',
+    { label: `삭제 (${paths.length}개, 휴지통으로)`, danger: true, disabled: off, run: () => deleteMany(paths) },
+    '-',
+    { label: '선택 해제', run: clearSel },
+  ];
+}
+
 function folderMenu() {
   const off = editOff();
   return [
+    {
+      label: selecting() ? '선택 끝내기' : '여러 개 선택',
+      run: () => {
+        if (selecting()) return clearSel();
+        sel.sticky = true;
+        updateSel();
+      },
+    },
+    { label: '전체 선택', run: () => { sel.sticky = true; selectAll(); } },
+    '-',
     { label: '새 파일', disabled: off, run: () => newEntry('file') },
     { label: '새 폴더', disabled: off, run: () => newEntry('dir') },
     {
@@ -1308,9 +1417,11 @@ function folderMenu() {
   ];
 }
 
-function setClip(mode, path) {
-  ctx.clip = { mode, paths: [path] };
-  toast(`${mode === 'copy' ? '복사' : '잘라내기'}: ${baseName(path)} · 붙여넣을 폴더의 메뉴에서 '붙여넣기'`, 4000);
+function setClip(mode, pathOrPaths) {
+  const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  ctx.clip = { mode, paths };
+  clearSel();
+  toast(`${mode === 'copy' ? '복사' : '잘라내기'}: ${clipLabel()} · 붙여넣을 폴더의 메뉴에서 '붙여넣기'`, 4000);
 }
 
 async function pasteInto(dir) {
@@ -1353,16 +1464,22 @@ async function renameEntry(full) {
   listDir(fb.path);
 }
 
-async function deleteEntry(full) {
-  if (!confirm(`'${baseName(full)}'을(를) 휴지통으로 옮길까요?`)) return;
+function deleteEntry(full) {
+  return deleteMany([full]);
+}
+
+async function deleteMany(paths) {
+  const what = paths.length > 1 ? `${paths.length}개 항목(${paths.slice(0, 3).map(baseName).join(', ')}${paths.length > 3 ? ' …' : ''})` : `'${baseName(paths[0])}'`;
+  if (!confirm(`${what}을(를) 휴지통으로 옮길까요?`)) return;
   let r;
   try {
-    r = await api('POST', '/files/delete', { paths: [full] });
+    r = await api('POST', '/files/delete', { paths });
   } catch (e) {
     return toast(e.message, 5000);
   }
-  if (reportFailures(r, '삭제')) toast(`휴지통으로 옮겼습니다: ${baseName(full)}`);
-  if (ctx.clip?.paths.includes(full)) ctx.clip = null;
+  if (reportFailures(r, '삭제')) toast(`휴지통으로 옮겼습니다: ${r.done.length}개`);
+  if (ctx.clip?.paths.some((p) => r.done.includes(p))) ctx.clip = null;
+  clearSel();
   listDir(fb.path);
 }
 
@@ -1391,7 +1508,40 @@ function downloadFile(path) {
 
 document.addEventListener('mousedown', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, true);
 document.addEventListener('touchstart', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, { capture: true, passive: true });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('ctxmenu').hidden) return closeCtx();
+  if ($('files').hidden || fb.file || !fb.path) return;
+  if (e.target.closest('input, textarea, select, [contenteditable], .xterm, dialog')) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  const picked = [...sel.paths];
+  if (e.key === 'Escape' && selecting()) {
+    clearSel();
+  } else if (mod && key === 'a') {
+    selectAll();
+  } else if ((e.key === 'Delete' || (e.metaKey && e.key === 'Backspace')) && picked.length) {
+    if (fb.fileEdit) deleteMany(picked);
+  } else if (mod && (key === 'c' || key === 'x') && picked.length) {
+    if (fb.fileEdit) setClip(key === 'c' ? 'copy' : 'move', picked);
+  } else if (mod && key === 'v' && ctx.clip) {
+    if (fb.fileEdit) pasteInto(fb.path);
+  } else {
+    return;
+  }
+  e.preventDefault();
+});
+
+for (const b of document.querySelectorAll('#fselbar [data-act]')) {
+  b.onclick = () => {
+    const picked = [...sel.paths];
+    const act = b.dataset.act;
+    if (act === 'copy' || act === 'cut') setClip(act === 'copy' ? 'copy' : 'move', picked);
+    else if (act === 'delete') deleteMany(picked);
+    else if (act === 'insert') insertPaths(picked);
+    else if (act === 'all') selectAll();
+    else if (act === 'clear') clearSel();
+  };
+}
 window.addEventListener('resize', closeCtx);
 $('fbody').addEventListener('scroll', closeCtx);
 $('fbody').addEventListener('contextmenu', (e) => {
@@ -1435,6 +1585,7 @@ async function openFile(path) {
   fb.rawMd = false;
   fb.meta = null;
   setEditUI(false);
+  updateSel();
   renderCrumb(path, true);
   $('fback').hidden = false;
   $('fmenu').hidden = true;
@@ -1648,14 +1799,21 @@ function fixMdLinks(div, file) {
 }
 
 function insertPath(p) {
+  insertPaths([p]);
+}
+
+function insertPaths(paths) {
   const cur = sessions.find((s) => s.name === activeName);
-  let rel = cur?.path && p.startsWith(`${cur.path}/`) ? p.slice(cur.path.length + 1) : p;
-  if (/\s/.test(rel)) rel = `"${rel}"`;
+  const rels = paths.map((p) => {
+    const rel = cur?.path && p.startsWith(`${cur.path}/`) ? p.slice(cur.path.length + 1) : p;
+    return /\s/.test(rel) ? `"${rel}"` : rel;
+  });
   setIme(true, false);
   if (ime.value && !/\s$/.test(ime.value)) ime.value += ' ';
-  ime.value += `${rel} `;
+  ime.value += `${rels.join(' ')} `;
   autoGrow();
-  toast(`입력창에 넣음: ${rel}`);
+  toast(rels.length > 1 ? `입력창에 경로 ${rels.length}개를 넣었습니다` : `입력창에 넣음: ${rels[0]}`);
+  clearSel();
   if (narrow.matches) $('files').hidden = true;
 }
 
