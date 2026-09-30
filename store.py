@@ -1,5 +1,3 @@
-"""~/.config/tmux-web 아래 JSON 설정 파일 읽기/쓰기."""
-
 import json
 import os
 from pathlib import Path
@@ -7,9 +5,7 @@ from pathlib import Path
 CONFIG_DIR = Path(os.environ.get("TMUX_WEB_CONFIG", "~/.config/tmux-web")).expanduser()
 
 DEFAULT_CONFIG = {
-    # 자주 쓰는 명령 버튼
     "snippets": ["claude", "claude --continue", "/compact", "/clear", "git status", "git log --oneline -10"],
-    # 새 세션 만들 때 최근 사용한 폴더
     "recent_dirs": [],
 }
 
@@ -48,9 +44,6 @@ def add_recent_dir(d: str) -> None:
     save_config(cfg)
 
 
-# ---------- 세션 그룹 ----------
-# config["groups"] = {"그룹 이름": ["세션1", "세션2", ...]}  (tmux 세션 이름 기준)
-
 def groups() -> dict[str, list[str]]:
     return load_config().get("groups", {})
 
@@ -79,7 +72,6 @@ def rename_group(old: str, new: str) -> None:
         raise KeyError("그룹이 없습니다")
     if new != old and new in gs:
         raise ValueError("이미 있는 그룹입니다")
-    # 순서 유지하며 키만 교체
     _save_groups({(new if k == old else k): v for k, v in gs.items()})
 
 

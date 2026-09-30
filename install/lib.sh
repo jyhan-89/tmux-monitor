@@ -1,4 +1,3 @@
-# install/ubuntu.sh, install/macos.sh 공통 함수 (source 해서 사용)
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="${TMUX_WEB_CONFIG:-$HOME/.config/tmux-web}"
@@ -6,9 +5,6 @@ TLS_DIR="${TMUX_WEB_TLS:-$CONFIG_DIR/tls}"
 PORT="${PORT:-8765}"
 
 ASSUME_YES=0
-# 설치 방식: lan   = 로컬 네트워크 서버 (앱이 0.0.0.0:PORT 에서 직접 응답, HTTP)
-#            https = nginx + 자체 인증서 (앱은 127.0.0.1, nginx가 443에서 HTTPS)
-#            local = 이 PC에서만 (127.0.0.1:PORT)
 MODE=lan
 WITH_SERVICE=1
 
@@ -24,7 +20,6 @@ ok()   { echo "    ${C_G}✔${C_0} $*"; }
 warn() { echo "    ${C_Y}!${C_0} $*"; }
 die()  { echo "${C_R}오류:${C_0} $*" >&2; exit 1; }
 
-# ask "질문" → y 이면 0. -y 옵션이면 항상 예
 ask() {
   [[ $ASSUME_YES == 1 ]] && return 0
   local reply
@@ -61,7 +56,6 @@ parse_args() {
   done
 }
 
-# Python 가상환경 + 패키지. venv에 pip가 없는 배포판(ensurepip 없음)도 get-pip.py로 처리
 setup_venv() {
   local py="$1"
   step "Python 가상환경 ($APP_DIR/.venv)"
@@ -92,7 +86,6 @@ setup_account() {
     ok "계정이 이미 있습니다 (변경: http://localhost:$PORT/dev/setup)"
     return
   fi
-  # 계정은 -y 여도 자동으로 만들지 않음 (비밀번호 입력 필요)
   if [[ -t 0 ]] && { read -r -p "    지금 계정을 만들까요? [Y/n] " reply </dev/tty; [[ ! $reply =~ ^[Nn] ]]; }; then
     local user
     read -r -p "    아이디 [$USER]: " user </dev/tty
@@ -105,14 +98,12 @@ setup_account() {
 make_cert() {
   step "HTTPS 인증서 (자체 CA)"
   local out
-  # openssl 진행 메시지는 숨기고, 실패하면 전체 출력을 보여줌
   out="$(TMUX_WEB_TLS="$TLS_DIR" OPENSSL="${OPENSSL:-openssl}" "$APP_DIR/deploy/make-cert.sh" 2>&1)" \
     || { echo "$out"; die "인증서 생성 실패"; }
   echo "$out" | grep -E '^(새 CA|서버 인증서)' | sed 's/^/    /'
   ok "CA: $TLS_DIR/ca.crt  (접속할 기기마다 한 번 설치)"
 }
 
-# deploy/nginx-tmux-web.conf 의 인증서 경로/포트를 바꿔서 출력
 render_nginx_conf() {
   local crt="$1" key="$2"
   sed -e "s#/etc/nginx/ssl/tmux-web.crt#$crt#" \
@@ -130,7 +121,6 @@ wait_healthy() {
   return 1
 }
 
-# 앱이 받을 주소: lan 모드만 네트워크 전체, 나머지는 이 PC(nginx가 앞단)
 app_host() { [[ $MODE == lan ]] && echo 0.0.0.0 || echo 127.0.0.1; }
 
 summary() {

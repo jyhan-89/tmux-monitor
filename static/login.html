@@ -22,7 +22,7 @@
   input:focus { outline:none; border-color:var(--accent); }
   button { margin-top:6px; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:10px; font:inherit; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.6; cursor:default; }
-  @media (max-width:768px) { input { font-size:16px; } }  /* iOS 확대 방지 */
+  @media (max-width:768px) { input { font-size:16px; } }
   #cahint, #setuphint { margin:4px 0 0; text-align:center; }
   #cahint a, #setuphint a { color:var(--accent); }
   #err { min-height:18px; color:var(--err); font-size:13px; }
@@ -42,7 +42,6 @@
 <script>
 const base = location.pathname.replace(/\/login\/?$/, '');
 const $ = (id) => document.getElementById(id);
-// 계정이 없으면 설정 안내, 이 PC에서 접속한 경우엔 계정 변경 링크 표시
 fetch(`${base}/api/setup`).then((r) => r.json()).then((s) => {
   const hint = $('setuphint');
   if (!s.configured) {

@@ -1,8 +1,3 @@
-"""로그인 계정/세션 관리.
-
-비밀번호 설정:  .venv/bin/python auth.py [사용자이름]
-"""
-
 import getpass
 import hashlib
 import json
@@ -13,15 +8,14 @@ import time
 from pathlib import Path
 
 AUTH_FILE = Path(os.environ.get("TMUX_WEB_AUTH", "~/.config/tmux-web/auth.json")).expanduser()
-SESSION_TTL = 30 * 24 * 3600  # 로그인 유지 기간
-MAX_FAILS = 5  # FAIL_WINDOW 안에 이만큼 틀리면 잠금
+SESSION_TTL = 30 * 24 * 3600
+MAX_FAILS = 5
 FAIL_WINDOW = 300
 
-# 로그인 세션: sha256(token) -> 만료 시각. 서버 재시작 후에도 유지되도록 파일에 저장
 SESSIONS_FILE = AUTH_FILE.with_name("sessions.json")
 _sessions: dict[str, float] = {}
 _loaded_mtime = 0.0
-_fails: dict[str, list[float]] = {}  # ip -> 실패 시각들
+_fails: dict[str, list[float]] = {}
 
 
 def _key(token: str) -> str:
@@ -29,7 +23,6 @@ def _key(token: str) -> str:
 
 
 def _load_sessions() -> None:
-    """파일이 바뀌었으면 다시 읽음 (CLI로 비밀번호 변경 시 즉시 로그아웃되도록)."""
     global _loaded_mtime
     try:
         mtime = SESSIONS_FILE.stat().st_mtime
@@ -68,7 +61,7 @@ def set_password(username: str, password: str) -> None:
     fd = os.open(AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(data, f)
-    _sessions.clear()  # 비밀번호 변경 시 모든 로그인 해제
+    _sessions.clear()
     _save_sessions()
 
 

@@ -1,9 +1,3 @@
-"""웹 푸시 알림 + 세션 상태 모니터.
-
-모든 세션의 상태를 주기적으로 확인해 캐시하고(목록 API가 사용),
-Claude 작업 완료/확인 필요로 바뀌면 구독한 기기로 푸시를 보낸다.
-"""
-
 import asyncio
 import base64
 import json
@@ -22,12 +16,10 @@ log = logging.getLogger("tmux-web")
 POLL_INTERVAL = 2.0
 VAPID_FILE = store.path("vapid.pem")
 SUBS_FILE = "push_subs.json"
-# 푸시 서비스(Apple/Google)에 전달되는 발신자 연락처 (mailto: 또는 https: 형식이어야 함)
 VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://github.com/jyhan-89/tmux-monitor")
 
-# 세션 이름 -> {"state", "preview"}
 status: dict[str, dict] = {}
-_pending: dict[str, str] = {}  # 깜빡임 방지: 두 번 연속 같은 상태여야 확정
+_pending: dict[str, str] = {}
 
 
 def _vapid() -> Vapid:
@@ -69,7 +61,7 @@ def send_all(title: str, body: str, session: str | None = None) -> int:
             sent += 1
         except WebPushException as e:
             code = e.response.status_code if e.response is not None else None
-            if code in (404, 410):  # 구독 만료
+            if code in (404, 410):
                 dead.append(sub["endpoint"])
             else:
                 log.warning("push 실패: %s", e)
@@ -95,7 +87,7 @@ def poll_once() -> list[tuple[str, str, str]]:
         name = s["name"]
         state, preview = tmuxctl.analyze(s["command"], tmuxctl.capture(s["pane_id"]))
         prev = status.get(name)
-        if prev is None:  # 처음 보는 세션은 바로 확정 (알림 없음)
+        if prev is None:
             status[name] = {"state": state, "preview": preview}
             continue
         prev["preview"] = preview

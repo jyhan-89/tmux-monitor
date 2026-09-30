@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# tmux 웹 모니터 설치 (Ubuntu / Debian 계열)
-#
-#  1. 패키지: tmux, python3-venv, openssl, curl, (nginx)
-#  2. Python 가상환경 + 의존성
-#  3. 로그인 계정
-#  4. systemd 사용자 서비스 (부팅 시 자동 시작: linger)
-#  5. 설치 방식별 네트워크 설정
-#     기본(로컬 네트워크 서버) : 앱이 0.0.0.0:8765 에서 직접 응답, 방화벽(ufw) 허용
-#     --https                  : 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
-#     --local                  : 이 PC에서만 (127.0.0.1:8765)
-#
-# 여러 번 실행해도 안전 (이미 된 단계는 갱신만 함). sudo 비밀번호를 물을 수 있음.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 parse_args "$@"
@@ -18,7 +6,6 @@ parse_args "$@"
 [[ $EUID -ne 0 ]] || die "root가 아닌 일반 사용자로 실행하세요 (필요한 곳에서만 sudo 사용)"
 command -v apt-get >/dev/null || die "apt-get이 없습니다. Ubuntu/Debian 계열에서 실행하세요"
 
-# ---------- 1. 패키지 ----------
 step "패키지 설치 (apt)"
 pkgs=(tmux python3 python3-venv openssl curl ca-certificates)
 [[ $MODE == https ]] && pkgs+=(nginx)
@@ -33,11 +20,9 @@ if ((${#missing[@]})); then
 fi
 ok "tmux $(tmux -V | cut -d' ' -f2), $(python3 --version)"
 
-# ---------- 2~3. Python / 계정 ----------
 setup_venv python3
 setup_account
 
-# ---------- 4. systemd 사용자 서비스 ----------
 if [[ $WITH_SERVICE == 1 ]]; then
   step "상시 실행 (systemd 사용자 서비스 tmux-web)"
   unit_dir="$HOME/.config/systemd/user"
@@ -49,7 +34,6 @@ if [[ $WITH_SERVICE == 1 ]]; then
   systemctl --user restart tmux-web
   wait_healthy && ok "실행 중: http://127.0.0.1:$PORT/dev" \
     || die "서비스가 응답하지 않습니다: journalctl --user -u tmux-web -n 50"
-  # 로그인하지 않아도 부팅 시 서비스가 뜨도록
   if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]]; then
     sudo loginctl enable-linger "$USER" && ok "부팅 시 자동 시작 (linger) 켬"
   else
@@ -59,7 +43,6 @@ else
   warn "상시 실행 생략: 필요할 때 $APP_DIR/run.sh 로 실행"
 fi
 
-# ---------- 5. 네트워크 ----------
 if [[ $MODE == lan ]]; then
   step "로컬 네트워크 서버 (0.0.0.0:$PORT)"
   if command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
@@ -81,7 +64,6 @@ if [[ $MODE == https ]]; then
     | sudo tee /etc/nginx/sites-available/tmux-web >/dev/null
   sudo ln -sf /etc/nginx/sites-available/tmux-web /etc/nginx/sites-enabled/tmux-web
   if [[ -L /etc/nginx/sites-enabled/default ]]; then
-    # 기본 사이트도 default_server(80)라 충돌 → 링크만 제거 (원본은 sites-available에 남음)
     sudo rm /etc/nginx/sites-enabled/default
     info "nginx 기본 사이트 비활성화 (sites-enabled/default 링크 제거)"
   fi

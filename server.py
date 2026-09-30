@@ -1,5 +1,3 @@
-"""tmux 세션 웹 모니터: 세션 목록/상태 조회 + 브라우저 터미널로 접속."""
-
 import asyncio
 import fcntl
 import json
@@ -33,16 +31,14 @@ import store
 from tmuxctl import capture, list_sessions, session_exists, tmux, valid_name
 
 STATIC_DIR = Path(__file__).parent / "static"
-# 서비스 경로 (예: /dev → http://주소/dev/)
 BASE_PATH = "/" + os.environ.get("BASE_PATH", "/dev").strip("/")
-BASE_PREFIX = BASE_PATH.rstrip("/")  # "/" 일 때는 ""
+BASE_PREFIX = BASE_PATH.rstrip("/")
 COOKIE = "tmuxweb_session"
 LOOPBACK = {"127.0.0.1", "::1"}
 LOCAL_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 MAX_UPLOAD = 200 * 1024 * 1024
-# 파일 탐색으로 볼 수 있는 범위 (이 폴더 밖은 거부, 읽기 전용)
 FILES_ROOT = Path(os.environ.get("TMUX_WEB_FILES_ROOT", "~")).expanduser().resolve()
-MAX_TEXT = 2 * 1024 * 1024  # 텍스트 보기 최대 크기
+MAX_TEXT = 2 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -61,13 +57,11 @@ def require_login(request: Request) -> None:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다")
 
 
-# 로그인이 필요한 API 전부
 api = APIRouter(prefix="/api", dependencies=[Depends(require_login)])
 
 
 def client_ip(request: Request) -> str:
     ip = request.client.host if request.client else "?"
-    # nginx / Tailscale Serve 등 로컬 리버스 프록시 뒤에서는 실제 클라이언트 IP 사용
     if ip in ("127.0.0.1", "::1"):
         forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
         ip = request.headers.get("x-real-ip") or forwarded or ip
@@ -75,12 +69,6 @@ def client_ip(request: Request) -> str:
 
 
 def is_local(request: Request) -> bool:
-    """이 PC에서 직접 접속했는지 (계정 설정/초기화 허용 조건).
-
-    - 실제 연결이 루프백이고, 프록시가 붙인 클라이언트 IP 헤더도 전부 루프백
-      (nginx는 X-Real-IP를 덮어쓰고, 다른 프록시는 X-Forwarded-For에 실제 IP를 덧붙임)
-    - Host가 localhost/127.0.0.1 → 외부 도메인을 127.0.0.1로 돌리는 DNS 리바인딩 차단
-    """
     if not request.client or request.client.host not in LOOPBACK:
         return False
     forwarded = [request.headers.get("x-real-ip", "")] + request.headers.get("x-forwarded-for", "").split(",")
@@ -104,8 +92,6 @@ def find_session(name: str) -> dict:
     raise HTTPException(404, "세션이 없습니다")
 
 
-# ---------- 페이지 ----------
-
 @router.get("/")
 def index(request: Request):
     if not auth.is_configured():
@@ -127,13 +113,11 @@ def setup_page():
 
 @router.get("/sw.js")
 def service_worker():
-    # scope가 BASE_PATH/ 전체가 되도록 static/ 이 아닌 경로에서 제공
     return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/ca.crt")
 def ca_certificate():
-    # 자체 HTTPS 인증서의 CA (공개 정보). 기기에 설치하면 IP 주소로도 경고 없이 접속됨
     ca = Path(os.environ.get("TMUX_WEB_TLS", "~/.config/tmux-web/tls")).expanduser() / "ca.crt"
     if not ca.exists():
         raise HTTPException(404, "CA 인증서가 없습니다 (deploy/make-cert.sh 실행 필요)")
@@ -144,8 +128,6 @@ def ca_certificate():
 def manifest():
     return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
 
-
-# ---------- 로그인 ----------
 
 class Login(BaseModel):
     username: str
@@ -178,8 +160,6 @@ def api_login(body: Login, request: Request, response: Response):
     return {"ok": True}
 
 
-# ---------- 계정 설정/초기화 (이 PC에서 접속했을 때만) ----------
-
 @router.get("/api/setup")
 def api_setup_status(request: Request):
     local = is_local(request)
@@ -204,7 +184,7 @@ def api_setup(body: Setup, request: Request):
         raise HTTPException(400, "아이디는 공백 없이 1~32자로 입력하세요")
     if len(body.password) < 8:
         raise HTTPException(400, "비밀번호는 8자 이상이어야 합니다")
-    auth.set_password(username, body.password)  # 기존 로그인은 모두 해제됨
+    auth.set_password(username, body.password)
     return {"ok": True}
 
 
@@ -214,8 +194,6 @@ def api_logout(request: Request, response: Response):
     response.delete_cookie(COOKIE, path=f"{BASE_PREFIX}/")
     return {"ok": True}
 
-
-# ---------- 세션 ----------
 
 @api.get("/sessions")
 def api_sessions():
@@ -232,7 +210,7 @@ def api_sessions():
 class NewSession(BaseModel):
     name: str
     cwd: str | None = None
-    command: str | None = None  # 만든 뒤 셸에 입력할 명령 (예: claude)
+    command: str | None = None
 
 
 @api.post("/sessions")
@@ -240,14 +218,12 @@ def api_create_session(body: NewSession):
     name = body.name.strip()
     if not valid_name(name):
         raise HTTPException(400, "세션 이름이 비어 있거나 '.' ':' 가 들어 있습니다")
-    # 폴더를 비우면 홈 폴더 (지정 안 하면 tmux가 웹 서버의 작업 폴더를 쓰게 됨)
     cwd = os.path.expanduser((body.cwd or "").strip() or "~")
     if not os.path.isdir(cwd):
         raise HTTPException(400, f"폴더가 없습니다: {cwd}")
     run("new-session", "-d", "-s", name, "-c", cwd)
     store.add_recent_dir(cwd)
     if body.command and body.command.strip():
-        # 셸에 입력하는 방식 → 명령이 끝나도 셸이 남아 세션 유지
         run("send-keys", "-t", f"={name}:", body.command.strip(), "Enter")
     return {"ok": True}
 
@@ -306,7 +282,7 @@ async def api_upload(name: str, file: UploadFile):
     base = re.sub(r"[/\\\x00]", "_", Path(file.filename or "upload").name).lstrip(".") or "upload"
     dest = folder / base
     stem, suffix, n = dest.stem, dest.suffix, 1
-    while dest.exists():  # 덮어쓰지 않도록 이름 뒤에 번호
+    while dest.exists():
         dest = folder / f"{stem}-{n}{suffix}"
         n += 1
     size = 0
@@ -325,8 +301,6 @@ async def api_upload(name: str, file: UploadFile):
         raise HTTPException(400, f"저장 실패: {e}")
     return {"path": str(dest), "size": size}
 
-
-# ---------- 그룹 ----------
 
 def valid_group(name: str) -> str:
     name = name.strip()
@@ -370,7 +344,6 @@ def api_rename_group(name: str, body: GroupRename):
 
 @api.delete("/groups/{name}")
 def api_delete_group(name: str, kill: bool = False):
-    """kill=true 이면 그룹 안 세션도 종료, 아니면 그룹만 없애고 세션은 '그룹 없음'으로."""
     try:
         members = store.delete_group(name)
     except KeyError as e:
@@ -389,7 +362,7 @@ def api_delete_group(name: str, kill: bool = False):
 
 
 class MoveGroup(BaseModel):
-    group: str | None  # None → 그룹 없음
+    group: str | None
 
 
 @api.put("/sessions/{name}/group")
@@ -401,10 +374,7 @@ def api_move_session(name: str, body: MoveGroup):
     return {"ok": True}
 
 
-# ---------- 파일 탐색 (읽기 전용) ----------
-
 def safe_path(path: str | None) -> Path:
-    """FILES_ROOT 안의 실제 경로로 변환. 심볼릭 링크로 밖을 가리켜도 거부."""
     p = Path(os.path.expanduser(path or str(FILES_ROOT)))
     if not p.is_absolute():
         p = FILES_ROOT / p
@@ -429,9 +399,9 @@ def api_files_list(path: str | None = None):
         raise HTTPException(403, "폴더를 읽을 권한이 없습니다")
     for e in items[:5000]:
         try:
-            st = e.stat()  # 링크는 대상 기준
+            st = e.stat()
             is_dir = e.is_dir()
-        except OSError:  # 깨진 링크 등
+        except OSError:
             st, is_dir = None, False
         entries.append({
             "name": e.name,
@@ -451,7 +421,7 @@ def api_files_list(path: str | None = None):
 
 
 def decode_text(data: bytes) -> str:
-    for enc in ("utf-8", "cp949"):  # 예전 한글 소스(EUC-KR)도 읽도록
+    for enc in ("utf-8", "cp949"):
         try:
             return data.decode(enc)
         except UnicodeDecodeError:
@@ -481,7 +451,6 @@ def api_files_raw(path: str, download: bool = False):
     if not f.is_file():
         raise HTTPException(400, "파일이 아닙니다")
     headers = {
-        # 홈 폴더의 HTML/SVG가 이 사이트 권한으로 스크립트를 실행하지 못하게
         "Content-Security-Policy": "sandbox",
         "X-Content-Type-Options": "nosniff",
     }
@@ -489,8 +458,6 @@ def api_files_raw(path: str, download: bool = False):
         return FileResponse(f, filename=f.name, headers=headers)
     return FileResponse(f, headers=headers, content_disposition_type="inline", filename=f.name)
 
-
-# ---------- 설정 (명령 버튼 / 폴더 추천) ----------
 
 class Config(BaseModel):
     snippets: list[str]
@@ -524,8 +491,6 @@ def api_dirs():
             dirs.append(d)
     return dirs[:60]
 
-
-# ---------- 푸시 알림 ----------
 
 @api.get("/push/key")
 def api_push_key():
@@ -561,28 +526,21 @@ def api_push_test():
 router.include_router(api)
 
 
-# ---------- 터미널 WebSocket ----------
-
 def set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
 def scroll_pane(name: str, lines: int, cols: int, rows: int) -> bytes:
-    """lines > 0: 위로(과거), < 0: 아래로.
-
-    앱이 마우스를 받는 경우(Claude Code 전체화면 등 자체 스크롤): 휠 이벤트 바이트를 반환 → pty로 전달.
-    그 외(일반 셸): tmux copy-mode로 히스토리 스크롤. 맨 아래까지 내리면 자동 종료(-e).
-    """
     target = f"={name}:"
     flags = tmux("display", "-p", "-t", target,
                  "#{pane_in_mode} #{mouse_standard_flag}#{mouse_button_flag}#{mouse_any_flag} #{mouse_sgr_flag}").stdout.split()
     in_mode, wants_mouse, sgr = flags[0] == "1", "1" in flags[1], flags[2] == "1"
     if wants_mouse and not in_mode:
-        button = 64 if lines > 0 else 65  # 휠 위/아래
+        button = 64 if lines > 0 else 65
         col, row = max(cols // 2, 1), max(rows // 2, 1)
         if sgr:
             event = f"\x1b[<{button};{col};{row}M".encode()
-        else:  # 구형 X10 마우스 형식
+        else:
             event = b"\x1b[M" + bytes([32 + button, 32 + min(col, 223), 32 + min(row, 223)])
         return event * min(abs(lines), 30)
     if lines > 0:
@@ -593,7 +551,6 @@ def scroll_pane(name: str, lines: int, cols: int, rows: int) -> bytes:
 
 
 def origin_allowed(ws: WebSocket) -> bool:
-    # 다른 사이트의 페이지가 브라우저를 통해 localhost 셸에 붙는 것을 방지
     origin = ws.headers.get("origin")
     host = ws.headers.get("host")
     return origin is None or origin.split("://", 1)[-1] == host
@@ -602,9 +559,8 @@ def origin_allowed(ws: WebSocket) -> bool:
 @router.websocket("/ws/{name}")
 async def ws_attach(ws: WebSocket, name: str):
     if not origin_allowed(ws):
-        await ws.close()  # 핸드셰이크 단계에서 403 거부
+        await ws.close()
         return
-    # accept 후에 닫아야 브라우저가 close code(4401/4404)를 받을 수 있음
     await ws.accept()
     if not auth.valid_session(ws.cookies.get(COOKIE)):
         await ws.close(code=4401)
@@ -614,7 +570,7 @@ async def ws_attach(ws: WebSocket, name: str):
         return
 
     pid, fd = pty.fork()
-    if pid == 0:  # child: tmux 클라이언트로 attach
+    if pid == 0:
         os.environ["TERM"] = "xterm-256color"
         os.environ.pop("TMUX", None)
         os.execvp("tmux", ["tmux", "-u", "attach-session", "-t", f"={name}"])
@@ -650,9 +606,9 @@ async def ws_attach(ws: WebSocket, name: str):
             elif msg["type"] == "resize":
                 size = (int(msg["cols"]), int(msg["rows"]))
                 set_winsize(fd, size[1], size[0])
-            elif msg["type"] == "ping":  # 연결 살아있는지 확인용 → 빈 프레임으로 응답
+            elif msg["type"] == "ping":
                 output.put_nowait(b"")
-            elif msg["type"] == "scroll":  # 모바일 스와이프: tmux copy-mode로 히스토리 스크롤
+            elif msg["type"] == "scroll":
                 wheel = await loop.run_in_executor(None, scroll_pane, name, int(msg["lines"]), *size)
                 if wheel:
                     os.write(fd, wheel)
@@ -663,7 +619,6 @@ async def ws_attach(ws: WebSocket, name: str):
     finally:
         sender.cancel()
         loop.remove_reader(fd)
-        # tmux 클라이언트만 종료 → 세션은 그대로 유지(detach와 동일)
         try:
             os.kill(pid, signal.SIGHUP)
         except ProcessLookupError:

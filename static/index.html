@@ -55,7 +55,6 @@
     <div id="term"><div id="empty">세션 목록에서 세션을 선택하면 접속합니다</div></div>
 
     <div id="snippets" hidden></div>
-    <!-- 모바일 키보드에 없는 특수키 -->
     <div id="keys">
       <button data-key="esc">Esc</button>
       <button data-key="tab">Tab</button>
@@ -73,7 +72,6 @@
       <button data-key="pgup">PgUp</button>
       <button data-key="pgdn">PgDn</button>
     </div>
-    <!-- xterm.js의 IME(한글 조합) 처리가 불안정해서 브라우저 기본 입력창으로 입력 후 전송 -->
     <div id="imebar" hidden>
       <button id="snippettoggle" title="자주 쓰는 명령">⚡</button>
       <button id="attach" title="파일 올리기 (세션 작업 폴더에 저장)">📎</button>
@@ -84,7 +82,6 @@
   </main>
   <div id="scrim"></div>
 
-  <!-- 파일 탐색 (읽기 전용) -->
   <section id="files" hidden>
     <header class="fhead">
       <button id="fback" title="목록으로" hidden>←</button>
@@ -102,7 +99,6 @@
   </section>
 </div>
 
-<!-- 새 세션 -->
 <dialog id="newdlg">
   <form method="dialog" id="newform">
     <h2>새 세션</h2>
@@ -122,14 +118,12 @@
     <input id="newcmd" placeholder="실행할 명령" hidden autocomplete="off">
     <div class="err" id="newerr"></div>
     <div class="actions">
-      <!-- type=button: 입력칸에서 Enter를 누르면 '만들기'로 제출되도록 -->
       <button type="button" data-close>취소</button>
       <button id="newok" class="primary" value="ok">만들기</button>
     </div>
   </form>
 </dialog>
 
-<!-- 세션을 그룹으로 이동 -->
 <dialog id="movedlg">
   <h2 id="movetitle">그룹으로 이동</h2>
   <div id="movelist"></div>
@@ -140,7 +134,6 @@
   <div class="actions"><button type="button" data-close>닫기</button></div>
 </dialog>
 
-<!-- 그룹 삭제 -->
 <dialog id="groupdeldlg">
   <h2 id="groupdeltitle">그룹 삭제</h2>
   <p class="hint" id="groupdelmsg"></p>
@@ -151,7 +144,6 @@
   </div>
 </dialog>
 
-<!-- 복사 모드 -->
 <dialog id="copydlg" class="big">
   <div class="dlghead">
     <h2>화면 내용 <small>길게 눌러 선택 후 복사</small></h2>
@@ -161,7 +153,6 @@
   <pre id="copytext"></pre>
 </dialog>
 
-<!-- 명령 버튼 편집 -->
 <dialog id="snipdlg">
   <form method="dialog">
     <h2>자주 쓰는 명령</h2>

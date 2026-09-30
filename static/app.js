@@ -1,13 +1,11 @@
 'use strict';
 
-// 페이지가 서비스되는 경로(/dev/ 등) 기준으로 API/WS 주소 구성
 const base = location.pathname.replace(/\/+$/, '');
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
 const narrow = matchMedia('(max-width: 768px)');
 const toLogin = () => location.replace(`${base}/login`);
 
-// localStorage는 막혀 있을 수 있으니 항상 try
 const LS = {
   get(key, fallback) {
     try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
@@ -18,10 +16,10 @@ const LS = {
 const STATE_LABEL = { working: '작업 중', waiting: '확인 필요', idle: '대기', running: '실행 중', shell: '셸' };
 
 let sessions = [];
-let groups = [];  // 그룹 이름 목록 (서버 저장)
+let groups = [];
 let sortMode = LS.get('sort', 'name-asc');
 const collapsedGroups = new Set(LS.get('collapsedGroups', []));
-const conns = new Map();  // 세션 이름 -> 열린 터미널 연결
+const conns = new Map();
 let activeName = null;
 let split = !!LS.get('split', false);
 let fontSize = +LS.get('fontSize', narrow.matches ? 12 : 14);
@@ -30,8 +28,6 @@ let ctrlArmed = false;
 let config = { snippets: [] };
 
 const active = () => conns.get(activeName) || null;
-
-// ================= 공통 =================
 
 let toastTimer;
 function toast(msg, ms = 2500) {
@@ -75,7 +71,6 @@ async function copyText(text) {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    // HTTP 주소에서는 clipboard API가 막혀 있어 예전 방식 사용
     const ta = document.createElement('textarea');
     ta.value = text;
     ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
@@ -87,12 +82,9 @@ async function copyText(text) {
   }
 }
 
-// 버튼을 눌러도 포커스(=모바일 키보드)가 유지되도록
 function keepFocus(el) {
   el.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
 }
-
-// ================= 세션 목록 =================
 
 async function refresh() {
   try {
@@ -123,7 +115,7 @@ function sortGroupNames(names) {
 }
 
 function renderList() {
-  if (drag) return;  // 끌고 있는 동안 목록이 바뀌면 안 되므로 끝난 뒤 다시 그림
+  if (drag) return;
   const ul = $('sessions');
   ul.innerHTML = '';
   const sorted = sortSessions(sessions);
@@ -131,7 +123,6 @@ function renderList() {
     for (const s of sorted) ul.appendChild(sessionItem(s, false));
     return;
   }
-  // 그룹별로 묶어서 표시, 그룹에 없는 세션은 맨 아래 '그룹 없음'
   const sections = sortGroupNames(groups).map((g) => [g, sorted.filter((s) => s.group === g)]);
   const loose = sorted.filter((s) => !s.group || !groups.includes(s.group));
   if (loose.length) sections.push([null, loose]);
@@ -145,13 +136,12 @@ function groupHeader(g, members) {
   const key = g ?? '';
   const li = document.createElement('li');
   li.className = 'group';
-  li.dataset.group = key;  // 드롭 대상
+  li.dataset.group = key;
   const folded = collapsedGroups.has(key);
   li.innerHTML = `<span class="gname"></span><span class="gdots"></span><span class="gcount"></span>
     ${g === null ? '' : '<button class="act grename" title="그룹 이름 바꾸기">✎</button><button class="act gdel" title="그룹 삭제">✕</button>'}`;
   li.querySelector('.gname').textContent = `${folded ? '▸' : '▾'} ${g ?? '그룹 없음'}`;
   li.querySelector('.gcount').textContent = members.length;
-  // 접었을 때도 작업 중/확인 필요 세션이 보이도록 점 표시
   const dots = li.querySelector('.gdots');
   for (const s of members) {
     if (s.state === 'working' || s.state === 'waiting') {
@@ -214,8 +204,6 @@ function sessionItem(s, inGroup) {
   li.querySelector('.move').onclick = (e) => { e.stopPropagation(); openMove(s); };
   return li;
 }
-
-// ================= 정렬 / 그룹 =================
 
 $('sort').value = sortMode;
 $('sort').onchange = () => {
@@ -326,10 +314,8 @@ async function moveTo(g) {
   if (await moveSession(movingSession, g)) $('movedlg').close();
 }
 
-// ---- 드래그로 그룹 이동 (PC: 마우스 드래그, 폰: 길게 눌러서 끌기) ----
-let drag = null;  // { name, li, target }
+let drag = null;
 
-// 화면 좌표/요소 아래의 드롭 대상 그룹 ('' = 그룹 없음, undefined = 대상 아님)
 function dropGroupAt(el) {
   const li = el?.closest?.('#sessions li');
   return li?.dataset.group;
@@ -360,7 +346,6 @@ function endDrag(drop) {
 
 function enableDrag(li, name) {
   li.classList.add('dnd');
-  // PC (마우스): 브라우저 기본 드래그. 터치 기기는 iOS 기본 드래그와 겹치지 않게 끔
   li.draggable = matchMedia('(pointer: fine)').matches;
   li.addEventListener('dragstart', (e) => {
     drag = { name, li, target: undefined };
@@ -370,7 +355,6 @@ function enableDrag(li, name) {
   });
   li.addEventListener('dragend', () => { if (drag) endDrag(false); });
 
-  // 폰: 길게 누르면 끌기 시작
   let timer = null;
   let x0 = 0;
   let y0 = 0;
@@ -383,7 +367,7 @@ function enableDrag(li, name) {
   }, { passive: true });
   li.addEventListener('touchmove', (e) => {
     const t = e.touches[0];
-    if (Math.hypot(t.clientX - x0, t.clientY - y0) > 10) clearTimeout(timer);  // 스크롤이면 취소
+    if (Math.hypot(t.clientX - x0, t.clientY - y0) > 10) clearTimeout(timer);
   }, { passive: true });
   li.addEventListener('touchend', () => clearTimeout(timer));
   li.addEventListener('touchcancel', () => clearTimeout(timer));
@@ -391,7 +375,7 @@ function enableDrag(li, name) {
 
 function startTouchDrag(name, li, x, y) {
   drag = { name, li, target: undefined };
-  drawerX = null;  // 세션 목록 '왼쪽 스와이프로 닫기'와 겹치지 않게
+  drawerX = null;
   li.classList.add('dragging');
   navigator.vibrate?.(30);
   const ghost = document.createElement('div');
@@ -401,19 +385,18 @@ function startTouchDrag(name, li, x, y) {
   const list = $('sessions');
 
   const move = (e) => {
-    e.preventDefault();  // 끄는 동안 목록 스크롤 막기
+    e.preventDefault();
     const t = e.touches[0];
     ghost.style.left = `${t.clientX}px`;
     ghost.style.top = `${t.clientY}px`;
     drag.target = dropGroupAt(document.elementFromPoint(t.clientX, t.clientY));
     highlightDrop(drag.target);
-    // 목록 위/아래 끝으로 끌면 자동 스크롤
     const r = list.getBoundingClientRect();
     if (t.clientY < r.top + 40) list.scrollTop -= 12;
     else if (t.clientY > r.bottom - 40) list.scrollTop += 12;
   };
   const end = (e) => {
-    e.preventDefault();  // 손을 뗄 때 세션이 열리지(click) 않게
+    e.preventDefault();
     document.removeEventListener('touchmove', move);
     document.removeEventListener('touchend', end);
     document.removeEventListener('touchcancel', end);
@@ -425,7 +408,6 @@ function startTouchDrag(name, li, x, y) {
   document.addEventListener('touchcancel', end, { passive: false });
 }
 
-// PC 드롭 대상 처리
 $('sessions').addEventListener('dragover', (e) => {
   if (!drag) return;
   const key = dropGroupAt(e.target);
@@ -458,7 +440,6 @@ async function renameSession(name) {
   } catch (e) {
     return toast(e.message, 4000);
   }
-  // 열려 있는 탭은 연결을 유지한 채 이름만 바꿈
   const conn = conns.get(name);
   if (conn) {
     conns.delete(name);
@@ -478,8 +459,6 @@ async function killSession(name) {
   try { await api('DELETE', `/sessions/${enc(name)}`); } catch (e) { toast(e.message); }
   refresh();
 }
-
-// ================= 터미널 연결 (탭) =================
 
 function saveTabs() {
   LS.set('openTabs', [...conns.keys()]);
@@ -524,7 +503,6 @@ function createConn(name) {
   conn.raw = (obj) => {
     if (conn.ws && conn.ws.readyState === WebSocket.OPEN) conn.ws.send(JSON.stringify(obj));
   };
-  // 스와이프로 스크롤(copy-mode) 중이면 입력 전에 빠져나와 앱에 키가 가도록
   conn.send = (obj) => {
     if (obj.type === 'input' && conn.scrolled) {
       conn.scrolled = false;
@@ -536,7 +514,6 @@ function createConn(name) {
   term.onData((data) => conn.send({ type: 'input', data: applyCtrl(data) }));
   term.onResize(({ cols, rows }) => conn.raw({ type: 'resize', cols, rows }));
   term.attachCustomKeyEventHandler((e) => {
-    // Ctrl+Shift+C: 선택한 글자 복사
     if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
       const sel = term.getSelection();
       if (sel) copyText(sel).then((ok) => toast(ok ? '복사했습니다' : '복사 실패'));
@@ -551,7 +528,6 @@ function createConn(name) {
   return conn;
 }
 
-// 보이는 상태에서 열어야 xterm이 글자 크기를 제대로 잼
 function ensureOpen(conn) {
   if (!conn.opened) {
     conn.term.open(conn.host);
@@ -580,7 +556,7 @@ function connectWs(conn) {
     conn.retry = 0;
     conn.gone = false;
     conn.lastRx = Date.now();
-    conn.term.reset();  // attach하면 tmux가 화면 전체를 다시 그려줌
+    conn.term.reset();
     showMsg(conn, '');
     fitConn(conn);
     conn.raw({ type: 'resize', cols: conn.term.cols, rows: conn.term.rows });
@@ -620,8 +596,6 @@ function reconnectNow(conn) {
   connectWs(conn);
 }
 
-// 화면이 다시 보이거나 네트워크가 돌아오면: 끊긴 연결은 바로 재연결,
-// 열려 있는 것처럼 보이는 연결도 ping으로 살아있는지 확인 (폰 절전 후 흔함)
 function checkConnections() {
   for (const conn of conns.values()) {
     if (conn.closed || conn.gone) continue;
@@ -666,7 +640,7 @@ function activate(name, focus = true) {
 
 function focusInput() {
   const c = active();
-  if (!c || narrow.matches) return;  // 폰에서는 키보드가 갑자기 올라오지 않게
+  if (!c || narrow.matches) return;
   if (imeOn) $('ime').focus(); else c.term.focus();
 }
 
@@ -707,15 +681,12 @@ function renderTabs() {
   box.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
-// ================= tmux 창/패널 =================
-
 function renderWinbar() {
   const bar = $('winbar');
   const c = active();
   const s = c && sessions.find((x) => x.name === c.name);
   const win = s?.windows.find((w) => w.active);
   const multi = s && (s.windows.length > 1 || (win && win.panes.length > 1));
-  // 폰에서는 창/패널이 여러 개일 때만 표시 (세로 공간 절약)
   if (!s || (narrow.matches && !multi)) {
     bar.hidden = true;
     return;
@@ -756,8 +727,6 @@ async function newWindow(name) {
   refresh();
 }
 
-// ================= 입력창 (한글) =================
-
 const ime = $('ime');
 
 function setIme(on, focus = true) {
@@ -777,9 +746,7 @@ function autoGrow() {
 function sendText(text, execute) {
   const c = active();
   if (!c) return toast('먼저 세션을 선택하세요');
-  // paste()는 앱이 bracketed paste 모드면 자동으로 감싸고 줄바꿈도 터미널 형식으로 변환
   if (text) c.term.paste(text);
-  // 붙여넣기 직후 바로 Enter를 보내면 일부 앱(Claude Code 등)이 붙여넣기의 일부로 처리하므로 약간 지연
   if (execute) setTimeout(() => c.send({ type: 'input', data: '\r' }), text ? 50 : 0);
 }
 
@@ -791,7 +758,6 @@ function sendIme(execute) {
 }
 
 ime.addEventListener('input', () => {
-  // Ctrl 버튼이 켜진 상태에서 한 글자 입력 → Ctrl 조합으로 바로 전송
   const c = active();
   if (ctrlArmed && c && ime.value.length === 1) {
     c.send({ type: 'input', data: applyCtrl(ime.value) });
@@ -801,7 +767,7 @@ ime.addEventListener('input', () => {
 });
 
 ime.addEventListener('keydown', (e) => {
-  if (e.isComposing || e.keyCode === 229) return;  // 한글 조합 중 Enter는 조합 확정용
+  if (e.isComposing || e.keyCode === 229) return;
   const c = active();
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -810,14 +776,12 @@ ime.addEventListener('keydown', (e) => {
     e.preventDefault();
     c?.term.focus();
   } else if (!ime.value && c && (e.key === 'Backspace' || e.key.startsWith('Arrow') || e.key === 'Tab')) {
-    // 입력창이 비어 있을 때는 편집 키를 터미널로 전달
     e.preventDefault();
     const keys = { Backspace: 'bs', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowRight: 'right', ArrowLeft: 'left' };
     c.send({ type: 'input', data: keySeq(keys[e.key]) });
   }
 });
 
-// 이미지 등 파일을 입력창에 붙여넣으면 업로드
 ime.addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files || [])];
   if (files.length) {
@@ -829,8 +793,6 @@ ime.addEventListener('paste', (e) => {
 $('imesend').onclick = () => sendIme(true);
 $('imetoggle').onclick = () => setIme(!imeOn);
 
-// ================= 특수키 / Ctrl =================
-
 function setCtrl(on) {
   ctrlArmed = on;
   $('ctrlkey').classList.toggle('armed', on);
@@ -840,12 +802,11 @@ function applyCtrl(data) {
   if (!ctrlArmed || data.length !== 1) return data;
   setCtrl(false);
   const code = data.toUpperCase().charCodeAt(0);
-  if (code >= 64 && code <= 95) return String.fromCharCode(code - 64);  // A → ^A
+  if (code >= 64 && code <= 95) return String.fromCharCode(code - 64);
   return data === ' ' ? '\x00' : data;
 }
 
 function keySeq(key) {
-  // vim/less 등이 켜는 application cursor 모드에서는 방향키 시퀀스가 다름
   const csi = active()?.term.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[';
   return {
     esc: '\x1b', tab: '\t', stab: '\x1b[Z', bs: '\x7f', 'c-c': '\x03', 'c-d': '\x04',
@@ -870,8 +831,6 @@ $('pastekey').onclick = async () => {
 keepFocus($('keys'));
 keepFocus($('imebar'));
 
-// ================= 자주 쓰는 명령 =================
-
 async function loadConfig() {
   try { config = await api('GET', '/config'); } catch {}
   renderSnippets();
@@ -892,7 +851,7 @@ function renderSnippets() {
   edit.textContent = '✎ 편집';
   edit.onclick = () => {
     $('sniptext').value = config.snippets.join('\n');
-    $('snipdlg').returnValue = '';  // Esc로 닫으면 저장 안 되게
+    $('snipdlg').returnValue = '';
     $('snipdlg').showModal();
   };
   box.appendChild(edit);
@@ -916,8 +875,6 @@ $('snipdlg').addEventListener('close', async () => {
   }
 });
 
-// ================= 파일 올리기 =================
-
 async function uploadFiles(files) {
   const c = active();
   if (!c) return toast('먼저 세션을 선택하세요');
@@ -933,7 +890,6 @@ async function uploadFiles(files) {
     }
   }
   toast(`업로드 완료 → ${paths.join(', ')}`, 4000);
-  // 입력창에 경로를 넣어 두어 Claude 등에게 바로 전달할 수 있게
   setIme(true, false);
   if (ime.value && !/\s$/.test(ime.value)) ime.value += ' ';
   ime.value += paths.join(' ') + ' ';
@@ -960,8 +916,6 @@ termEl.addEventListener('drop', (e) => {
   uploadFiles([...e.dataTransfer.files]);
 });
 
-// ================= 복사 모드 =================
-
 $('copymode').onclick = async () => {
   const c = active();
   if (!c) return toast('먼저 세션을 선택하세요');
@@ -979,12 +933,9 @@ $('copyall').onclick = async () => {
 };
 $('copyclose').onclick = () => $('copydlg').close();
 
-// 대화상자의 '취소' 버튼
 for (const b of document.querySelectorAll('dialog [data-close]')) {
   b.onclick = () => b.closest('dialog').close('cancel');
 }
-
-// ================= 새 세션 =================
 
 $('new').onclick = async () => {
   $('newform').reset();
@@ -998,7 +949,6 @@ $('new').onclick = async () => {
     $('newcmd').value = last;
   }
   $('newcmd').hidden = sel.value !== 'custom';
-  // 기본 작업 폴더: 지금 보고 있는 세션의 현재 폴더(PWD)
   const cur = sessions.find((s) => s.name === activeName);
   $('newdir').value = cur?.path || '';
   $('newname').placeholder = autoName($('newdir').value) || '폴더 이름으로 자동';
@@ -1040,8 +990,6 @@ $('newform').addEventListener('submit', async (e) => {
   openSession(name);
 });
 
-// ================= 알림 (웹 푸시) =================
-
 let swReg = null;
 
 async function initServiceWorker() {
@@ -1051,7 +999,6 @@ async function initServiceWorker() {
     } catch (e) {
       console.warn('service worker 등록 실패', e);
     }
-    // 알림을 눌렀을 때 이미 열린 창이면 해당 세션으로 이동
     navigator.serviceWorker.addEventListener('message', (e) => {
       if (e.data?.open) openSession(e.data.open);
     });
@@ -1102,13 +1049,10 @@ $('notify').onclick = async () => {
   updateNotifyButton();
 };
 
-// ================= 파일 탐색 (읽기 전용) =================
-// Markdown/코드 보기 라이브러리는 처음 열 때만 불러옴
-
 const VIEWER_CSS = 'https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/styles/github-dark.min.css';
 const VIEWER_JS = [
   'https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js',
-  'https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js',  // Markdown 속 HTML/스크립트 제거
+  'https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js',
   'https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/highlight.min.js',
 ];
 let viewerLibs = null;
@@ -1126,7 +1070,7 @@ function loadViewerLibs() {
       s.onerror = () => reject(new Error(`불러오기 실패: ${src}`));
       document.head.appendChild(s);
     })));
-    viewerLibs.catch(() => { viewerLibs = null; });  // 다음에 다시 시도
+    viewerLibs.catch(() => { viewerLibs = null; });
   }
   return viewerLibs;
 }
@@ -1175,7 +1119,6 @@ function toggleFiles() {
   }
   panel.hidden = false;
   setDrawer(false);
-  // 처음 열거나 다른 세션으로 바뀌었으면 그 세션의 현재 폴더부터
   if (!fb.path || fb.session !== activeName) {
     fb.session = activeName;
     listDir(sessions.find((s) => s.name === activeName)?.path || null);
@@ -1187,8 +1130,8 @@ async function listDir(path) {
   try {
     r = await api('GET', `/files/list${path ? `?path=${enc(path)}` : ''}`);
   } catch (e) {
-    if (fb.path && !fb.file) return toast(e.message, 4000);  // 둘러보던 중이면 그 자리에 머묾
-    if (path) {  // 처음 열 때 세션 폴더를 볼 수 없으면 홈부터
+    if (fb.path && !fb.file) return toast(e.message, 4000);
+    if (path) {
       toast(e.message, 4000);
       return listDir(null);
     }
@@ -1274,12 +1217,11 @@ async function openFile(path) {
   fileMsg('불러오는 중…');
   let r;
   try {
-    // 라이브러리를 못 불러와도(오프라인 등) 일반 텍스트로는 보여줌
     [r] = await Promise.all([api('GET', `/files/read?path=${enc(path)}`), loadViewerLibs().catch(() => null)]);
   } catch (e) {
     return fileMsg(e.message);
   }
-  if (fb.file !== path) return;  // 그 사이 다른 파일을 열었음
+  if (fb.file !== path) return;
   if (r.binary) return fileMsg(`바이너리 파일입니다 (${fmtSize(r.size)}). 내려받기로 확인하세요.`);
   fb.text = r.text;
   fb.truncated = r.truncated;
@@ -1324,7 +1266,7 @@ function codeView(text, lang) {
         ? hljs.highlight(src, { language: lang, ignoreIllegals: true })
         : src.length < 100000 ? hljs.highlightAuto(src) : null;
       if (r) {
-        code.innerHTML = r.value;  // highlight.js가 원문을 이스케이프한 결과
+        code.innerHTML = r.value;
         code.className = 'hljs';
       }
     } catch {}
@@ -1334,7 +1276,6 @@ function codeView(text, lang) {
   return wrap;
 }
 
-// Markdown 안의 상대 경로 이미지/링크를 파일 탐색 기준으로 바꿈
 function fixMdLinks(div, file) {
   const dir = file.slice(0, file.lastIndexOf('/'));
   const isRelative = (u) => u && !/^([a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(u);
@@ -1369,7 +1310,6 @@ function fixMdLinks(div, file) {
 }
 
 function insertPath(p) {
-  // 지금 세션의 작업 폴더 아래면 상대 경로로 짧게
   const cur = sessions.find((s) => s.name === activeName);
   let rel = cur?.path && p.startsWith(`${cur.path}/`) ? p.slice(cur.path.length + 1) : p;
   if (/\s/.test(rel)) rel = `"${rel}"`;
@@ -1378,7 +1318,7 @@ function insertPath(p) {
   ime.value += `${rel} `;
   autoGrow();
   toast(`입력창에 넣음: ${rel}`);
-  if (narrow.matches) $('files').hidden = true;  // 폰에서는 바로 입력할 수 있게 닫기
+  if (narrow.matches) $('files').hidden = true;
 }
 
 $('filesbtn').onclick = toggleFiles;
@@ -1395,8 +1335,6 @@ $('fshowhidden').onchange = () => {
   if (!fb.file && fb.path) listDir(fb.path);
 };
 
-// ================= 글자 크기 =================
-
 function setFontSize(size) {
   fontSize = Math.max(8, Math.min(28, Math.round(size)));
   LS.set('fontSize', fontSize);
@@ -1407,11 +1345,6 @@ function setFontSize(size) {
 }
 $('fontdown').onclick = () => setFontSize(fontSize - 1);
 $('fontup').onclick = () => setFontSize(fontSize + 1);
-
-// ================= 터치 제스처 (터미널 영역) =================
-//  한 손가락 위/아래 스와이프 → tmux 히스토리 스크롤
-//  두 손가락 핀치 → 글자 크기
-//  화면 왼쪽 끝에서 오른쪽으로 스와이프 → 세션 목록
 
 let touch = null;
 const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -1431,7 +1364,7 @@ termEl.addEventListener('touchstart', (e) => {
 termEl.addEventListener('touchmove', (e) => {
   if (!touch) return;
   const t = e.touches;
-  if (touch.mode !== 'pending') e.stopPropagation();  // xterm 자체 터치 스크롤과 겹치지 않게
+  if (touch.mode !== 'pending') e.stopPropagation();
   if (touch.mode === 'pinch' && t.length === 2) {
     e.preventDefault();
     const size = (touch.startSize * dist(t)) / touch.startDist;
@@ -1453,7 +1386,7 @@ termEl.addEventListener('touchmove', (e) => {
     }
   } else if (touch.mode === 'scroll' && c) {
     e.preventDefault();
-    touch.acc += t[0].clientY - touch.y;  // 아래로 끌면(+) 과거 쪽으로
+    touch.acc += t[0].clientY - touch.y;
     touch.y = t[0].clientY;
     const lines = Math.trunc(touch.acc / cellHeight(c));
     if (lines) {
@@ -1464,7 +1397,6 @@ termEl.addEventListener('touchmove', (e) => {
   }
 }, { passive: false, capture: true });
 
-// PC 마우스 휠: xterm.js 기본 동작(대체 화면에서 ↑↓ 키 전송) 대신 스와이프와 같은 스크롤 처리
 let wheelAcc = 0;
 termEl.addEventListener('wheel', (e) => {
   const name = e.target.closest('.pane')?.dataset.name;
@@ -1473,7 +1405,7 @@ termEl.addEventListener('wheel', (e) => {
   e.preventDefault();
   e.stopPropagation();
   const px = e.deltaMode === 1 ? e.deltaY * cellHeight(c) : e.deltaMode === 2 ? e.deltaY * c.el.clientHeight : e.deltaY;
-  wheelAcc -= px;  // 휠을 위로(-) 굴리면 과거 쪽(+)
+  wheelAcc -= px;
   const lines = Math.trunc(wheelAcc / cellHeight(c));
   if (lines) {
     wheelAcc -= lines * cellHeight(c);
@@ -1483,12 +1415,9 @@ termEl.addEventListener('wheel', (e) => {
 }, { passive: false, capture: true });
 
 termEl.addEventListener('touchend', (e) => {
-  // 스와이프/핀치였으면 탭(키보드 열기)으로 처리되지 않게
   if (touch && touch.mode !== 'pending') e.preventDefault();
   if (e.touches.length === 0) touch = null;
 }, { capture: true });
-
-// ================= 레이아웃 (세션 목록 / 분할) =================
 
 const setDrawer = (open) => $('app').classList.toggle('drawer', open);
 
@@ -1500,7 +1429,6 @@ $('menu').onclick = () => {
 };
 $('scrim').onclick = () => setDrawer(false);
 
-// 세션 목록에서 왼쪽으로 스와이프 → 닫기
 let drawerX = null;
 const aside = document.querySelector('aside');
 aside.addEventListener('touchstart', (e) => { drawerX = e.touches[0].clientX; }, { passive: true });
@@ -1519,7 +1447,6 @@ $('split').onclick = () => {
 };
 narrow.addEventListener('change', layout);
 
-// 키보드가 올라오면 보이는 영역에 맞춰 높이 조정 (iOS Safari 대응)
 if (window.visualViewport) {
   const vv = window.visualViewport;
   const fitViewport = () => {
@@ -1530,8 +1457,6 @@ if (window.visualViewport) {
   vv.addEventListener('scroll', () => window.scrollTo(0, 0));
   fitViewport();
 }
-
-// ================= 기타 버튼 / 시작 =================
 
 $('refresh').onclick = refresh;
 $('logout').onclick = async () => {
@@ -1554,11 +1479,9 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) checkConnections()
 
   await refresh();
   const exists = (n) => sessions.some((s) => s.name === n);
-  // 이전에 열어 둔 탭 복원
   for (const name of LS.get('openTabs', [])) if (exists(name)) openSession(name);
   const last = LS.get('activeTab', null);
   if (last && conns.has(last)) activate(last, false);
-  // 알림을 눌러서 들어온 경우 (?s=세션)
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);

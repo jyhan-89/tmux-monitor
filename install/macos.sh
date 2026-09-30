@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# tmux 웹 모니터 설치 (macOS, Homebrew 필요)
-#
-#  1. 패키지: tmux, python, openssl@3, (nginx)  — Homebrew
-#  2. Python 가상환경 + 의존성
-#  3. 로그인 계정
-#  4. launchd 사용자 에이전트 (로그인 시 자동 시작, 죽으면 재시작)
-#  5. 설치 방식별 네트워크 설정
-#     기본(로컬 네트워크 서버) : 앱이 0.0.0.0:8765 에서 직접 응답
-#     --https                  : 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
-#     --local                  : 이 Mac에서만 (127.0.0.1:8765)
-#
-# 여러 번 실행해도 안전 (이미 된 단계는 갱신만 함).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 parse_args "$@"
@@ -18,7 +6,6 @@ parse_args "$@"
 [[ "$(uname -s)" == Darwin ]] || die "macOS에서 실행하세요 (Ubuntu는 install/ubuntu.sh)"
 [[ $EUID -ne 0 ]] || die "sudo 없이 일반 사용자로 실행하세요"
 
-# ---------- 1. 패키지 ----------
 step "패키지 설치 (Homebrew)"
 if ! command -v brew >/dev/null; then
   for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
@@ -38,21 +25,18 @@ if ((${#missing[@]})); then
   brew install -q "${missing[@]}"
 fi
 PY="$BREW/bin/python3"
-export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"  # 기본 LibreSSL은 인증서 옵션 일부 미지원
+export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
 ok "tmux $("$BREW/bin/tmux" -V | cut -d' ' -f2), $("$PY" --version)"
 
-# ---------- 2~3. Python / 계정 ----------
 setup_venv "$PY"
 setup_account
 
-# ---------- 4. launchd 에이전트 ----------
 LABEL="kr.tmuxweb.server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/tmux-web.log"
 if [[ $WITH_SERVICE == 1 ]]; then
   step "상시 실행 (launchd: $LABEL)"
   mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
-  # launchd는 PATH가 최소라서 brew의 tmux를 찾도록 지정. 한글 처리를 위해 UTF-8 로케일
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -87,7 +71,6 @@ else
   warn "상시 실행 생략: 필요할 때 $APP_DIR/run.sh 로 실행"
 fi
 
-# ---------- 5. 네트워크 ----------
 if [[ $MODE == lan ]]; then
   step "로컬 네트워크 서버 (0.0.0.0:$PORT)"
   info "macOS 방화벽이 켜져 있으면 'python이 들어오는 연결을 허용' 창이 뜰 수 있습니다 → 허용"
@@ -97,7 +80,6 @@ fi
 if [[ $MODE == https ]]; then
   make_cert
   step "nginx 설정 (80 → 443 HTTPS, /dev 프록시)"
-  # brew nginx.conf 는 servers/* 를 include. 사용자 권한으로 실행되므로 인증서는 제자리에서 읽음
   conf_dir="$BREW/etc/nginx/servers"
   mkdir -p "$conf_dir"
   render_nginx_conf "$TLS_DIR/server.crt" "$TLS_DIR/server.key" > "$conf_dir/tmux-web.conf"

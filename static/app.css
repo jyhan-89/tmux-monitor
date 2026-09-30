@@ -4,7 +4,6 @@
 }
 * { box-sizing:border-box; }
 html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
-/* --app-h: 모바일 키보드가 올라왔을 때 실제 보이는 높이 (visualViewport) */
 #app {
   display:flex; height:var(--app-h, 100dvh);
   padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -14,7 +13,6 @@ button:hover { border-color:var(--accent); }
 button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
 button.on { border-color:var(--accent); color:var(--accent); }
 
-/* ---- 세션 목록 ---- */
 aside { width:300px; flex:none; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; }
 aside header { padding:10px 12px; display:flex; align-items:center; gap:6px; border-bottom:1px solid var(--line); }
 aside header h1 { font-size:15px; margin:0; flex:1; }
@@ -27,7 +25,6 @@ aside header button { padding:4px 8px; }
 #sessions li:hover { background:#2f3237; }
 #sessions li.open { background:#2a2f38; }
 #sessions li.active { background:#2c3a4f; outline:1px solid var(--accent); }
-/* 그룹 헤더 */
 #sessions li.group { flex-direction:row; align-items:center; gap:6px; padding:6px 8px; margin-top:6px; color:var(--dim); font-size:12px; font-weight:600; border-bottom:1px solid var(--line); border-radius:0; }
 #sessions li.group:first-child { margin-top:0; }
 #sessions li.group:hover { background:none; color:var(--fg); }
@@ -36,7 +33,6 @@ aside header button { padding:4px 8px; }
 #sessions li.group .gdots { display:flex; gap:3px; }
 #sessions li.group .gdots .dot { width:6px; height:6px; background:currentColor; }
 #sessions li.ingroup { margin-left:10px; }
-/* 드래그로 그룹 이동 */
 #sessions li.dnd { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
 #sessions li.dragging { opacity:.4; }
 #sessions li.group.droptarget { color:var(--accent); background:rgba(79,156,249,.15); outline:1px dashed var(--accent); border-radius:6px; }
@@ -52,7 +48,6 @@ aside header button { padding:4px 8px; }
 #sessions li:hover .act { visibility:visible; }
 @media (hover:none) { .act { visibility:visible; } }
 
-/* 상태 배지 */
 .badge { font-size:11px; padding:1px 6px; border-radius:9px; flex:none; border:1px solid currentColor; }
 .st-working { color:var(--busy); }
 .st-waiting { color:var(--warn); }
@@ -62,7 +57,6 @@ aside header button { padding:4px 8px; }
 .badge.st-waiting { background:rgba(240,179,90,.15); animation:pulse 1.4s infinite; }
 @keyframes pulse { 50% { opacity:.55; } }
 
-/* ---- 상단 바 / 탭 ---- */
 main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #bar { padding:6px 8px; border-bottom:1px solid var(--line); display:flex; gap:6px; align-items:center; }
 #bar > button { flex:none; padding:4px 9px; }
@@ -79,7 +73,6 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .tab .tclose { border:0; background:none; padding:0 4px; color:var(--dim); }
 .tab .tclose:hover { color:var(--fg); }
 
-/* tmux 창/패널 선택 줄 */
 #winbar { display:flex; gap:4px; padding:4px 8px; border-bottom:1px solid var(--line); overflow-x:auto; scrollbar-width:none; align-items:center; font-size:12px; }
 #winbar[hidden] { display:none; }
 #winbar button { flex:none; padding:2px 8px; font-size:12px; }
@@ -87,7 +80,6 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #winbar .sep { color:var(--line); padding:0 4px; }
 #winbar .lbl { color:var(--dim); flex:none; }
 
-/* ---- 터미널 ---- */
 #term { flex:1; min-height:0; padding:4px; position:relative; touch-action:none; display:flex; }
 #term.split { display:grid; gap:4px; }
 #term.split.n2 { grid-template-columns:1fr 1fr; }
@@ -105,7 +97,6 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #empty { margin:auto; color:var(--dim); text-align:center; padding:16px; }
 #term.dragover { outline:2px dashed var(--accent); outline-offset:-6px; }
 
-/* ---- 명령 버튼 / 특수키 / 입력창 ---- */
 #snippets, #keys { gap:6px; padding:6px 8px; overflow-x:auto; border-top:1px solid var(--line); background:var(--panel); scrollbar-width:none; }
 #snippets { display:flex; }
 #snippets[hidden] { display:none; }
@@ -120,7 +111,6 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #ime { flex:1; min-width:0; resize:none; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 9px; font:14px/1.4 system-ui, sans-serif; max-height:8.4em; }
 #ime:focus { outline:none; border-color:var(--accent); }
 
-/* ---- 대화상자 ---- */
 dialog { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:20px; width:min(92vw, 440px); }
 dialog::backdrop { background:rgba(0,0,0,.55); }
 dialog h2 { margin:0 0 12px; font-size:16px; }
@@ -153,7 +143,6 @@ dialog.big[open] { display:flex; flex-direction:column; }
 #scrim { display:none; }
 #app.collapsed aside { display:none; }
 
-/* ---- 파일 탐색 ---- */
 #files { position:fixed; top:0; right:0; width:min(50vw, 860px); height:var(--app-h, 100dvh); z-index:30; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; box-shadow:-4px 0 24px rgba(0,0,0,.35); padding-top:env(safe-area-inset-top); }
 #files[hidden] { display:none; }
 .fhead { display:flex; gap:6px; align-items:center; padding:8px; border-bottom:1px solid var(--line); }
@@ -180,12 +169,10 @@ a.btn:hover { border-color:var(--accent); }
 .fmsg { padding:24px; color:var(--dim); text-align:center; }
 .fimg { padding:12px; text-align:center; }
 .fimg img { max-width:100%; background:repeating-conic-gradient(#2a2c30 0 25%, #222428 0 50%) 0 0/16px 16px; }
-/* 코드 보기: 줄 번호 + 문법 색상 */
 .code { display:flex; min-width:max-content; font:12.5px/1.55 ui-monospace, "D2Coding", monospace; }
 .code pre { margin:0; padding:8px 14px 8px 10px; }
 .code .ln { position:sticky; left:0; text-align:right; color:#5c6370; background:var(--panel); border-right:1px solid var(--line); user-select:none; -webkit-user-select:none; padding:8px 8px 8px 10px; }
 .code code.hljs { background:none; padding:0; }
-/* Markdown 문서 보기 */
 .md { padding:16px 22px 40px; max-width:920px; line-height:1.7; font-size:14.5px; overflow-wrap:anywhere; }
 .md h1, .md h2 { border-bottom:1px solid var(--line); padding-bottom:.3em; }
 .md a { color:var(--accent); }
@@ -199,10 +186,8 @@ a.btn:hover { border-color:var(--accent); }
 .md blockquote { margin:0; padding-left:14px; border-left:3px solid var(--line); color:var(--dim); }
 .md hr { border:0; border-top:1px solid var(--line); }
 
-/* 터치 기기: 특수키 줄 표시 */
 @media (max-width:768px), (pointer:coarse) { #keys { display:flex; } }
 
-/* 좁은 화면(폰): 세션 목록을 서랍 메뉴로 */
 @media (max-width:768px) {
   aside { position:fixed; top:0; left:0; height:var(--app-h, 100dvh); padding-top:env(safe-area-inset-top); width:min(88vw, 340px); z-index:20; transform:translateX(-100%); transition:transform .2s; }
   #app.collapsed aside { display:flex; }
@@ -211,7 +196,7 @@ a.btn:hover { border-color:var(--accent); }
   .wide-only { display:none !important; }
   #term { padding:2px; }
   #imebar { padding:6px 8px; }
-  #ime { font-size:16px; }  /* iOS: 16px 미만이면 포커스 시 화면 확대됨 */
+  #ime { font-size:16px; }
   #sessions li { padding:12px 10px; }
   dialog input, dialog select { font-size:16px; }
   #files { width:100%; border-left:0; }
