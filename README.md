@@ -9,8 +9,21 @@
 
 ## 설치
 
+설치 스크립트가 패키지, Python 환경, 계정, 자동 시작, HTTPS(nginx + 자체 인증서)까지 한 번에 구성한다.
+여러 번 실행해도 안전하다.
+
 ```bash
-python3 -m venv .venv            # pip가 없으면 get-pip.py로 설치
+install/ubuntu.sh     # Ubuntu/Debian: apt, systemd 사용자 서비스, /etc/nginx
+install/macos.sh      # macOS: Homebrew, launchd 에이전트, brew nginx
+```
+
+옵션: `-y` 질문에 모두 예, `--no-nginx` HTTPS 없이 `http://localhost:8765/dev` 만, `--no-service` 자동 시작 등록 생략.
+포트를 바꾸려면 `PORT=9000 install/ubuntu.sh`.
+
+수동으로 실행만 하려면:
+
+```bash
+python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ./run.sh                         # http://127.0.0.1:8765/dev/
 ```
@@ -27,7 +40,8 @@ python3 -m venv .venv            # pip가 없으면 get-pip.py로 설치
 
 - `tmux-web.service`: systemd 사용자 서비스 (`~/.config/systemd/user/`에 복사 후 `systemctl --user enable --now tmux-web`)
 - `nginx-tmux-web.conf`: HTTPS 리버스 프록시 (`/dev` → 127.0.0.1:8765)
-- `make-cert.sh`: IP 주소용 자체 CA/인증서 생성. 기기에는 `/dev/ca.crt`를 설치
+- `make-cert.sh`: IP 주소용 자체 CA/인증서 생성. 기기에는 `/dev/ca.crt`를 설치.
+  IP가 바뀌면 설치 스크립트를 다시 실행하면 인증서가 새로 발급된다 (CA는 유지되므로 기기 재설치 불필요)
 
 ## 설정 파일 (`~/.config/tmux-web/`)
 
