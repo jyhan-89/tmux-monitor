@@ -85,8 +85,8 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .lroot { flex:1 1 0; min-width:0; min-height:0; display:flex; }
 .lroot > * { flex:1 1 0; }
 .lsplit { display:flex; min-width:0; min-height:0; overflow:hidden; }
-.lsplit.row { flex-direction:row; }
-.lsplit.col { flex-direction:column; }
+.lsplit.d-row { flex-direction:row; }
+.lsplit.d-col { flex-direction:column; }
 .leaf { position:relative; display:flex; flex-direction:column; flex:1 1 0; min-width:0; min-height:0; border:1px solid transparent; border-radius:4px; }
 .lroot.multi .leaf { border-color:var(--line); }
 .lroot.multi .leaf.focus { border-color:var(--accent); }
@@ -104,8 +104,8 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .phost { position:absolute; inset:2px; }
 .pane .xterm { height:100%; }
 .lgutter { flex:none; position:relative; z-index:3; border-radius:3px; }
-.lgutter.row { width:6px; cursor:col-resize; }
-.lgutter.col { height:6px; cursor:row-resize; }
+.lgutter.d-row { width:6px; cursor:col-resize; }
+.lgutter.d-col { height:6px; cursor:row-resize; }
 .lgutter:hover, .lgutter.dragging { background:rgba(79,156,249,.55); }
 .dropzone { position:absolute; z-index:40; pointer-events:none; background:rgba(79,156,249,.18); border:2px solid var(--accent); border-radius:6px; transition:left .08s, top .08s, width .08s, height .08s; }
 .dropzone[hidden] { display:none; }

@@ -775,7 +775,7 @@ function closePane(name) {
 function buildNode(n, multi) {
   if (n.t === 'leaf') return buildLeaf(n.name, multi);
   const box = document.createElement('div');
-  box.className = `lsplit ${n.dir}`;
+  box.className = `lsplit d-${n.dir}`;
   n.kids.forEach((k, i) => {
     if (i) box.appendChild(buildGutter(n, i));
     const child = buildNode(k, multi);
@@ -815,7 +815,7 @@ function buildLeaf(name, multi) {
 
 function buildGutter(node, i) {
   const g = document.createElement('div');
-  g.className = `lgutter ${node.dir}`;
+  g.className = `lgutter d-${node.dir}`;
   g.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     g.setPointerCapture(e.pointerId);
