@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmux 모니터 로그인</title>
+<meta name="theme-color" content="#1e1f22">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="static/icons/icon-180.png">
+<link rel="icon" href="static/icons/icon-192.png">
+<style>
+  :root { --bg:#1e1f22; --panel:#26282c; --line:#35373c; --fg:#d7d9dd; --dim:#8b8f97; --accent:#4f9cf9; --err:#f07178; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
+  body { display:flex; align-items:center; justify-content:center; padding:16px; }
+  form { width:100%; max-width:340px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:28px 24px; display:flex; flex-direction:column; gap:14px; }
+  h1 { margin:0 0 4px; font-size:18px; }
+  p.sub { margin:0 0 6px; color:var(--dim); font-size:13px; }
+  label { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--dim); }
+  input { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:9px 10px; font:inherit; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { margin-top:6px; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:10px; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  @media (max-width:768px) { input { font-size:16px; } }  /* iOS 확대 방지 */
+  #cahint { margin:4px 0 0; text-align:center; }
+  #cahint a { color:var(--accent); }
+  #err { min-height:18px; color:var(--err); font-size:13px; }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>tmux 모니터</h1>
+  <p class="sub">계속하려면 로그인하세요</p>
+  <label>아이디 <input id="u" autocomplete="username" required autofocus></label>
+  <label>비밀번호 <input id="p" type="password" autocomplete="current-password" required></label>
+  <div id="err"></div>
+  <button id="b">로그인</button>
+  <p class="sub" id="cahint">주소창에 경고가 뜨면 <a href="ca.crt">인증서</a>를 이 기기에 설치하세요</p>
+</form>
+<script>
+const base = location.pathname.replace(/\/login\/?$/, '');
+const $ = (id) => document.getElementById(id);
+$('f').onsubmit = async (ev) => {
+  ev.preventDefault();
+  $('b').disabled = true;
+  $('err').textContent = '';
+  try {
+    const res = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('u').value, password: $('p').value }),
+    });
+    if (res.ok) return location.replace(`${base}/`);
+    $('err').textContent = (await res.json()).detail || '로그인 실패';
+    $('p').value = '';
+    $('p').focus();
+  } catch (e) {
+    $('err').textContent = '서버에 연결할 수 없습니다';
+  } finally {
+    $('b').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

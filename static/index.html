@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content, viewport-fit=cover">
+<meta name="theme-color" content="#1e1f22">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="tmux">
+<title>tmux 모니터</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="static/icons/icon-180.png">
+<link rel="icon" href="static/icons/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.min.css">
+<link rel="stylesheet" href="static/app.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <header>
+      <h1>tmux 세션</h1>
+      <button id="new" title="새 세션">＋</button>
+      <button id="refresh" title="새로고침">↻</button>
+      <button id="notify" title="알림 켜기/끄기">🔕</button>
+      <button id="logout" title="로그아웃">⏻</button>
+    </header>
+    <div id="listtools">
+      <select id="sort" title="정렬">
+        <option value="name-asc">이름 ↑ (오름차순)</option>
+        <option value="name-desc">이름 ↓ (내림차순)</option>
+        <option value="activity">최근 활동순</option>
+        <option value="created">만든 순</option>
+      </select>
+      <button id="newgroup" title="새 그룹">＋ 그룹</button>
+    </div>
+    <ul id="sessions"></ul>
+  </aside>
+
+  <main>
+    <div id="bar">
+      <button id="menu" title="세션 목록 (열기/닫기)">☰</button>
+      <div id="tabs"></div>
+      <button id="split" class="wide-only" title="여러 세션 동시에 보기">⊞</button>
+      <button id="fontdown" class="wide-only" title="글자 작게">A−</button>
+      <button id="fontup" class="wide-only" title="글자 크게">A+</button>
+      <button id="copymode" title="화면 내용 복사">📋</button>
+      <button id="imetoggle" title="한글 입력창 켜기/끄기">가</button>
+    </div>
+    <div id="winbar" hidden></div>
+
+    <div id="term"><div id="empty">세션 목록에서 세션을 선택하면 접속합니다</div></div>
+
+    <div id="snippets" hidden></div>
+    <!-- 모바일 키보드에 없는 특수키 -->
+    <div id="keys">
+      <button data-key="esc">Esc</button>
+      <button data-key="tab">Tab</button>
+      <button id="ctrlkey" title="다음 입력 글자와 Ctrl 조합">Ctrl</button>
+      <button data-key="c-c">^C</button>
+      <button data-key="up">↑</button>
+      <button data-key="down">↓</button>
+      <button data-key="left">←</button>
+      <button data-key="right">→</button>
+      <button data-key="stab" title="Shift+Tab">⇧Tab</button>
+      <button id="pastekey">붙여넣기</button>
+      <button data-key="c-d">^D</button>
+      <button data-key="home">Home</button>
+      <button data-key="end">End</button>
+      <button data-key="pgup">PgUp</button>
+      <button data-key="pgdn">PgDn</button>
+    </div>
+    <!-- xterm.js의 IME(한글 조합) 처리가 불안정해서 브라우저 기본 입력창으로 입력 후 전송 -->
+    <div id="imebar" hidden>
+      <button id="snippettoggle" title="자주 쓰는 명령">⚡</button>
+      <button id="attach" title="파일 올리기 (세션 작업 폴더에 저장)">📎</button>
+      <textarea id="ime" rows="1" placeholder="한글 입력 — Enter: 전송+실행 · Shift+Enter: 줄바꿈 · Ctrl+Enter: 전송만 · Esc: 터미널로"></textarea>
+      <button id="imesend" title="전송+실행">전송</button>
+      <input id="file" type="file" multiple hidden>
+    </div>
+  </main>
+  <div id="scrim"></div>
+</div>
+
+<!-- 새 세션 -->
+<dialog id="newdlg">
+  <form method="dialog" id="newform">
+    <h2>새 세션</h2>
+    <label>작업 폴더
+      <input id="newdir" list="dirlist" placeholder="~/Workspace/프로젝트" autocomplete="off">
+      <datalist id="dirlist"></datalist>
+    </label>
+    <label>세션 이름 <input id="newname" placeholder="폴더 이름으로 자동" autocomplete="off"></label>
+    <label>시작할 명령
+      <select id="newcmdsel">
+        <option value="">없음 (셸만)</option>
+        <option value="claude">claude</option>
+        <option value="claude --continue">claude --continue</option>
+        <option value="custom">직접 입력…</option>
+      </select>
+    </label>
+    <input id="newcmd" placeholder="실행할 명령" hidden autocomplete="off">
+    <div class="err" id="newerr"></div>
+    <div class="actions">
+      <!-- type=button: 입력칸에서 Enter를 누르면 '만들기'로 제출되도록 -->
+      <button type="button" data-close>취소</button>
+      <button id="newok" class="primary" value="ok">만들기</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 세션을 그룹으로 이동 -->
+<dialog id="movedlg">
+  <h2 id="movetitle">그룹으로 이동</h2>
+  <div id="movelist"></div>
+  <form id="moveform" class="inline">
+    <input id="movenew" placeholder="새 그룹 이름" autocomplete="off">
+    <button class="primary">만들고 이동</button>
+  </form>
+  <div class="actions"><button type="button" data-close>닫기</button></div>
+</dialog>
+
+<!-- 그룹 삭제 -->
+<dialog id="groupdeldlg">
+  <h2 id="groupdeltitle">그룹 삭제</h2>
+  <p class="hint" id="groupdelmsg"></p>
+  <div class="actions vertical">
+    <button id="groupdelkeep" class="primary">그룹만 삭제 (세션은 유지)</button>
+    <button id="groupdelkill" class="danger">세션도 모두 종료</button>
+    <button type="button" data-close>취소</button>
+  </div>
+</dialog>
+
+<!-- 복사 모드 -->
+<dialog id="copydlg" class="big">
+  <div class="dlghead">
+    <h2>화면 내용 <small>길게 눌러 선택 후 복사</small></h2>
+    <button id="copyall" class="primary">전체 복사</button>
+    <button id="copyclose">닫기</button>
+  </div>
+  <pre id="copytext"></pre>
+</dialog>
+
+<!-- 명령 버튼 편집 -->
+<dialog id="snipdlg">
+  <form method="dialog">
+    <h2>자주 쓰는 명령</h2>
+    <p class="hint">한 줄에 명령 하나씩 적으세요. 버튼을 누르면 입력 후 실행됩니다.</p>
+    <textarea id="sniptext" rows="10"></textarea>
+    <div class="actions">
+      <button type="button" data-close>취소</button>
+      <button id="snipsave" class="primary" value="ok">저장</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" hidden></div>
+<script src="static/app.js"></script>
+</body>
+</html>

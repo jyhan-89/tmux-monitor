@@ -1,0 +1,10 @@
+[Unit]
+Description=tmux web monitor
+
+[Service]
+WorkingDirectory=%h/dev_monitor
+ExecStart=%h/dev_monitor/.venv/bin/python server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
