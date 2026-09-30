@@ -2,6 +2,10 @@
 
 로컬 tmux 세션 목록을 웹에서 보고, 브라우저 터미널로 접속해 작업하는 서비스.
 
+A self-hosted web UI to monitor and attach to local tmux sessions from any browser (desktop & mobile),
+with Claude Code status detection and push notifications.
+Free for personal, educational, research and other noncommercial use — see [License](#license).
+
 - 세션 목록/미리보기, Claude Code 상태(작업 중·확인 필요·대기) 표시와 푸시 알림
 - 탭·분할 화면, 자동 재연결, 한글 입력창, 모바일 특수키·제스처, 홈 화면 앱(PWA)
 - 세션 생성(작업 폴더·시작 명령)·이름 변경·종료, tmux 창/패널 전환
@@ -54,3 +58,18 @@ python3 -m venv .venv
 
 계정(`auth.json`), 로그인 세션, 명령 버튼·그룹(`config.json`), 푸시 키/구독, TLS 인증서.
 저장소에는 포함하지 않는다.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE)
+
+- **무료**: 개인, 학생, 교육기관(대학 등), 공공 연구기관, 정부기관, 비영리 단체의 사용
+- **상업 라이선스 필요**: 회사·영리 목적의 사용 (사내 사용 포함)
+- 상업 라이선스 문의: jyhan.dev@gmail.com
+
+Free for noncommercial use. Commercial use (including internal use at a company) requires a commercial license —
+contact jyhan.dev@gmail.com.
+
+## 기여
+
+현재 외부 코드 기여(Pull Request)는 받지 않습니다. 버그 제보와 기능 제안은 Issues에 남겨 주세요.

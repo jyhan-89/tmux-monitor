@@ -22,8 +22,8 @@ log = logging.getLogger("tmux-web")
 POLL_INTERVAL = 2.0
 VAPID_FILE = store.path("vapid.pem")
 SUBS_FILE = "push_subs.json"
-# 푸시 서비스(Apple/Google)에 전달되는 연락처 (형식만 검사됨)
-VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://jyhan-nuc.tailed5047.ts.net")
+# 푸시 서비스(Apple/Google)에 전달되는 발신자 연락처 (mailto: 또는 https: 형식이어야 함)
+VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://github.com/jyhan-89/tmux-monitor")
 
 # 세션 이름 -> {"state", "preview"}
 status: dict[str, dict] = {}
