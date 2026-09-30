@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmux 모니터 계정 설정</title>
+<meta name="theme-color" content="#1e1f22">
+<link rel="icon" href="static/icons/icon-192.png">
+<style>
+  :root { --bg:#1e1f22; --panel:#26282c; --line:#35373c; --fg:#d7d9dd; --dim:#8b8f97; --accent:#4f9cf9; --err:#f07178; --warn:#f0b35a; --ok:#4cc38a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
+  body { display:flex; align-items:center; justify-content:center; padding:16px; }
+  form { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:28px 24px; display:flex; flex-direction:column; gap:14px; }
+  h1 { margin:0 0 4px; font-size:18px; }
+  p { margin:0; color:var(--dim); font-size:13px; line-height:1.5; }
+  p.warn { color:var(--warn); }
+  p.ok { color:var(--ok); }
+  label { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--dim); }
+  input { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:9px 10px; font:inherit; }
+  input:focus { outline:none; border-color:var(--accent); }
+  input:disabled { opacity:.5; }
+  button { margin-top:6px; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:10px; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  a { color:var(--accent); }
+  code { background:var(--bg); padding:1px 5px; border-radius:4px; }
+  #err { min-height:18px; color:var(--err); font-size:13px; }
+  @media (max-width:768px) { input { font-size:16px; } }  /* iOS 확대 방지 */
+</style>
+</head>
+<body>
+<form id="f">
+  <h1 id="title">계정 설정</h1>
+  <p id="desc">확인 중…</p>
+  <label>아이디 <input id="u" autocomplete="username" required disabled></label>
+  <label>새 비밀번호 (8자 이상) <input id="p" type="password" autocomplete="new-password" minlength="8" required disabled></label>
+  <label>새 비밀번호 확인 <input id="p2" type="password" autocomplete="new-password" minlength="8" required disabled></label>
+  <div id="err"></div>
+  <button id="b" disabled>저장</button>
+  <p><a href="login">로그인 화면으로</a></p>
+</form>
+<script>
+const base = location.pathname.replace(/\/setup\/?$/, '');
+const $ = (id) => document.getElementById(id);
+
+fetch(`${base}/api/setup`).then((r) => r.json()).then((s) => {
+  $('title').textContent = s.configured ? '아이디/비밀번호 변경' : '처음 계정 만들기';
+  if (!s.local) {
+    $('desc').className = 'warn';
+    $('desc').innerHTML = '보안을 위해 계정 설정은 <b>서버 PC에서 직접</b> 접속했을 때만 할 수 있습니다.<br>'
+      + `서버 PC의 브라우저에서 <code>http://localhost:8765${base}/setup</code> 을 열어 주세요.`;
+    return;
+  }
+  $('desc').textContent = s.configured
+    ? '이 PC에서 접속했으므로 현재 비밀번호 없이 바꿀 수 있습니다. 저장하면 모든 기기에서 로그아웃됩니다.'
+    : '웹 모니터에 로그인할 아이디와 비밀번호를 정하세요.';
+  $('u').value = s.username || '';
+  for (const id of ['u', 'p', 'p2', 'b']) $(id).disabled = false;
+  (s.username ? $('p') : $('u')).focus();
+}).catch(() => { $('desc').textContent = '서버에 연결할 수 없습니다'; });
+
+$('f').onsubmit = async (ev) => {
+  ev.preventDefault();
+  $('err').textContent = '';
+  if ($('p').value !== $('p2').value) {
+    $('err').textContent = '비밀번호가 서로 다릅니다';
+    return $('p2').focus();
+  }
+  $('b').disabled = true;
+  try {
+    const res = await fetch(`${base}/api/setup`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '저장 실패');
+    $('desc').className = 'ok';
+    $('desc').textContent = '저장했습니다. 새 비밀번호로 로그인하세요.';
+    setTimeout(() => location.replace(`${base}/login`), 1200);
+  } catch (e) {
+    $('err').textContent = e.message;
+    $('b').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

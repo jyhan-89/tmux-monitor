@@ -12,9 +12,16 @@
 ```bash
 python3 -m venv .venv            # pip가 없으면 get-pip.py로 설치
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python auth.py         # 로그인 계정 설정
 ./run.sh                         # http://127.0.0.1:8765/dev/
 ```
+
+## 계정 설정 / 초기화
+
+처음 실행하면 계정이 없으므로 서버 PC의 브라우저에서 `http://localhost:8765/dev/setup` 을 열어 아이디/비밀번호를 만든다.
+같은 주소에서 현재 비밀번호 없이 아이디/비밀번호를 초기화할 수 있다 (저장하면 모든 기기 로그아웃).
+
+- 서버 PC에서 localhost 주소로 접속했을 때만 허용 (외부 IP, 프록시 헤더 위조, DNS 리바인딩 차단)
+- 터미널에서는 `.venv/bin/python auth.py [아이디]` 로도 설정 가능
 
 ## 배포 (deploy/)
 

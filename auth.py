@@ -76,7 +76,16 @@ def is_configured() -> bool:
     return AUTH_FILE.exists()
 
 
+def username() -> str | None:
+    try:
+        return json.loads(AUTH_FILE.read_text())["username"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None
+
+
 def verify(username: str, password: str) -> bool:
+    if not is_configured():
+        return False
     data = json.loads(AUTH_FILE.read_text())
     expected = bytes.fromhex(data["hash"])
     actual = _hash(password, bytes.fromhex(data["salt"]))

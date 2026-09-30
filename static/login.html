@@ -23,8 +23,8 @@
   button { margin-top:6px; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:10px; font:inherit; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.6; cursor:default; }
   @media (max-width:768px) { input { font-size:16px; } }  /* iOS 확대 방지 */
-  #cahint { margin:4px 0 0; text-align:center; }
-  #cahint a { color:var(--accent); }
+  #cahint, #setuphint { margin:4px 0 0; text-align:center; }
+  #cahint a, #setuphint a { color:var(--accent); }
   #err { min-height:18px; color:var(--err); font-size:13px; }
 </style>
 </head>
@@ -36,11 +36,27 @@
   <label>비밀번호 <input id="p" type="password" autocomplete="current-password" required></label>
   <div id="err"></div>
   <button id="b">로그인</button>
+  <p class="sub" id="setuphint" hidden></p>
   <p class="sub" id="cahint">주소창에 경고가 뜨면 <a href="ca.crt">인증서</a>를 이 기기에 설치하세요</p>
 </form>
 <script>
 const base = location.pathname.replace(/\/login\/?$/, '');
 const $ = (id) => document.getElementById(id);
+// 계정이 없으면 설정 안내, 이 PC에서 접속한 경우엔 계정 변경 링크 표시
+fetch(`${base}/api/setup`).then((r) => r.json()).then((s) => {
+  const hint = $('setuphint');
+  if (!s.configured) {
+    hint.innerHTML = s.local
+      ? '계정이 아직 없습니다. <a href="setup">계정 만들기</a>'
+      : '계정이 아직 없습니다. 서버 PC에서 <b>http://localhost:8765/dev/setup</b> 을 열어 만드세요';
+  } else if (s.local) {
+    hint.innerHTML = '<a href="setup">아이디/비밀번호 변경</a> (이 PC에서만 가능)';
+  } else {
+    return;
+  }
+  hint.hidden = false;
+}).catch(() => {});
+
 $('f').onsubmit = async (ev) => {
   ev.preventDefault();
   $('b').disabled = true;

@@ -37,6 +37,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 BASE_PATH = "/" + os.environ.get("BASE_PATH", "/dev").strip("/")
 BASE_PREFIX = BASE_PATH.rstrip("/")  # "/" 일 때는 ""
 COOKIE = "tmuxweb_session"
+LOOPBACK = {"127.0.0.1", "::1"}
+LOCAL_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 MAX_UPLOAD = 200 * 1024 * 1024
 
 
@@ -69,6 +71,23 @@ def client_ip(request: Request) -> str:
     return ip
 
 
+def is_local(request: Request) -> bool:
+    """이 PC에서 직접 접속했는지 (계정 설정/초기화 허용 조건).
+
+    - 실제 연결이 루프백이고, 프록시가 붙인 클라이언트 IP 헤더도 전부 루프백
+      (nginx는 X-Real-IP를 덮어쓰고, 다른 프록시는 X-Forwarded-For에 실제 IP를 덧붙임)
+    - Host가 localhost/127.0.0.1 → 외부 도메인을 127.0.0.1로 돌리는 DNS 리바인딩 차단
+    """
+    if not request.client or request.client.host not in LOOPBACK:
+        return False
+    forwarded = [request.headers.get("x-real-ip", "")] + request.headers.get("x-forwarded-for", "").split(",")
+    if any(ip.strip() and ip.strip() not in LOOPBACK for ip in forwarded):
+        return False
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin")
+    return bool(LOCAL_HOST.match(host)) and (origin is None or origin.split("://", 1)[-1] == host)
+
+
 def run(*args: str) -> None:
     res = tmux(*args)
     if res.returncode != 0:
@@ -86,6 +105,8 @@ def find_session(name: str) -> dict:
 
 @router.get("/")
 def index(request: Request):
+    if not auth.is_configured():
+        return RedirectResponse(f"{BASE_PREFIX}/setup")
     if not auth.valid_session(request.cookies.get(COOKIE)):
         return RedirectResponse(f"{BASE_PREFIX}/login")
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
@@ -94,6 +115,11 @@ def index(request: Request):
 @router.get("/login")
 def login_page():
     return FileResponse(STATIC_DIR / "login.html")
+
+
+@router.get("/setup")
+def setup_page():
+    return FileResponse(STATIC_DIR / "setup.html")
 
 
 @router.get("/sw.js")
@@ -126,6 +152,8 @@ class Login(BaseModel):
 @router.post("/api/login")
 def api_login(body: Login, request: Request, response: Response):
     ip = client_ip(request)
+    if not auth.is_configured():
+        raise HTTPException(503, "계정이 아직 없습니다. 이 PC에서 계정을 먼저 만드세요")
     if auth.locked_out(ip):
         raise HTTPException(429, "로그인 시도가 너무 많습니다. 5분 후 다시 시도하세요")
     if not auth.verify(body.username, body.password):
@@ -144,6 +172,36 @@ def api_login(body: Login, request: Request, response: Response):
         samesite="strict",
         secure=https,
     )
+    return {"ok": True}
+
+
+# ---------- 계정 설정/초기화 (이 PC에서 접속했을 때만) ----------
+
+@router.get("/api/setup")
+def api_setup_status(request: Request):
+    local = is_local(request)
+    return {
+        "configured": auth.is_configured(),
+        "local": local,
+        "username": auth.username() if local else None,
+    }
+
+
+class Setup(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/api/setup")
+def api_setup(body: Setup, request: Request):
+    if not is_local(request):
+        raise HTTPException(403, "계정 설정은 이 PC에서 localhost 주소로 접속했을 때만 가능합니다")
+    username = body.username.strip()
+    if not username or len(username) > 32 or any(c.isspace() for c in username):
+        raise HTTPException(400, "아이디는 공백 없이 1~32자로 입력하세요")
+    if len(body.password) < 8:
+        raise HTTPException(400, "비밀번호는 8자 이상이어야 합니다")
+    auth.set_password(username, body.password)  # 기존 로그인은 모두 해제됨
     return {"ok": True}
 
 
@@ -539,7 +597,9 @@ if __name__ == "__main__":
     import uvicorn
 
     if not auth.is_configured():
-        sys.exit("로그인 계정이 없습니다. 먼저 실행하세요: .venv/bin/python auth.py")
+        port_ = os.environ.get("PORT", "8765")
+        print(f"로그인 계정이 없습니다. 이 PC의 브라우저에서 http://localhost:{port_}{BASE_PREFIX}/setup 을 열어 만드세요",
+              file=sys.stderr)
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8765"))
     uvicorn.run(app, host=host, port=port)
