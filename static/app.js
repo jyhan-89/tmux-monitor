@@ -51,7 +51,9 @@ async function api(method, path, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const d = data.detail;
-    throw new Error(typeof d === 'string' ? d : (d ? JSON.stringify(d) : res.statusText));
+    const err = new Error(typeof d === 'string' ? d : (d ? JSON.stringify(d) : res.statusText));
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -1075,7 +1077,10 @@ function loadViewerLibs() {
   return viewerLibs;
 }
 
-const fb = { path: null, root: '', session: null, file: null, text: '', truncated: false, rawMd: false };
+const fb = {
+  path: null, root: '', session: null, file: null, text: '', truncated: false, rawMd: false,
+  meta: null, editing: false, dirty: false,
+};
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
 const MD_EXT = /\.(md|markdown|mdx)$/i;
 const LANG_BY_EXT = {
@@ -1111,12 +1116,20 @@ function fileMsg(text, append = false) {
   $('fbody').appendChild(d);
 }
 
+function confirmLeave() {
+  if (fb.editing && fb.dirty && !confirm('저장하지 않은 변경 사항이 있습니다. 버리고 나갈까요?')) return false;
+  fb.editing = false;
+  fb.dirty = false;
+  return true;
+}
+
+function closeFiles() {
+  if (confirmLeave()) $('files').hidden = true;
+}
+
 function toggleFiles() {
   const panel = $('files');
-  if (!panel.hidden) {
-    panel.hidden = true;
-    return;
-  }
+  if (!panel.hidden) return closeFiles();
   panel.hidden = false;
   setDrawer(false);
   if (!fb.path || fb.session !== activeName) {
@@ -1126,6 +1139,7 @@ function toggleFiles() {
 }
 
 async function listDir(path) {
+  if (!confirmLeave()) return;
   let r;
   try {
     r = await api('GET', `/files/list${path ? `?path=${enc(path)}` : ''}`);
@@ -1194,9 +1208,12 @@ function renderCrumb(path, isFile) {
 }
 
 async function openFile(path) {
+  if (!confirmLeave()) return;
   const name = path.split('/').pop();
   fb.file = path;
   fb.rawMd = false;
+  fb.meta = null;
+  setEditUI(false);
   renderCrumb(path, true);
   $('fback').hidden = false;
   $('ftools').hidden = false;
@@ -1225,12 +1242,111 @@ async function openFile(path) {
   if (r.binary) return fileMsg(`바이너리 파일입니다 (${fmtSize(r.size)}). 내려받기로 확인하세요.`);
   fb.text = r.text;
   fb.truncated = r.truncated;
+  fb.meta = r;
+  renderFile();
+}
+
+function setEditUI(on) {
+  const name = fb.file ? fb.file.split('/').pop() : '';
+  $('fedit').hidden = on || !fb.meta?.editable;
+  $('fsave').hidden = !on;
+  $('fcancel').hidden = !on;
+  $('fmdtoggle').hidden = on || !MD_EXT.test(name);
+  $('finsert').hidden = on;
+  $('fbody').classList.toggle('editing', on);
+  $('fname').textContent = (on && fb.dirty ? '● ' : '') + name;
+}
+
+function indentUnit(text, file) {
+  if (/(^|\/)(GNU)?[Mm]akefile$|\.mk$/.test(file) || /^\t/m.test(text)) return '\t';
+  const m = text.match(/^( {2,8})\S/m);
+  return m ? m[1] : '    ';
+}
+
+function startEdit() {
+  if (!fb.meta?.editable) return;
+  fb.editing = true;
+  fb.dirty = false;
+  const body = $('fbody');
+  body.innerHTML = '';
+  const ta = document.createElement('textarea');
+  ta.id = 'feditor';
+  ta.value = fb.text;
+  ta.spellcheck = false;
+  ta.setAttribute('autocapitalize', 'off');
+  ta.setAttribute('autocomplete', 'off');
+  ta.setAttribute('autocorrect', 'off');
+  ta.wrap = 'off';
+  const indent = indentUnit(fb.text, fb.file);
+  ta.addEventListener('input', () => {
+    if (!fb.dirty) {
+      fb.dirty = true;
+      setEditUI(true);
+    }
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveFile(true);
+    } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      ta.setRangeText(indent, ta.selectionStart, ta.selectionEnd, 'end');
+      ta.dispatchEvent(new Event('input'));
+    }
+  });
+  body.appendChild(ta);
+  setEditUI(true);
+  ta.focus();
+  ta.setSelectionRange(0, 0);
+  ta.scrollTop = 0;
+}
+
+async function saveFile(stay = false, force = false) {
+  const ta = $('feditor');
+  if (!ta || !fb.editing) return;
+  $('fsave').disabled = true;
+  let r;
+  try {
+    r = await api('PUT', '/files/write', {
+      path: fb.file,
+      text: ta.value,
+      mtime: force ? null : fb.meta.mtime,
+      encoding: fb.meta.encoding,
+      newline: fb.meta.newline,
+    });
+  } catch (e) {
+    if (e.status === 409 && confirm('다른 곳(터미널 등)에서 파일이 바뀌었습니다. 지금 편집한 내용으로 덮어쓸까요?')) {
+      $('fsave').disabled = false;
+      return saveFile(stay, true);
+    }
+    toast(`저장 실패: ${e.message}`, 5000);
+    return;
+  } finally {
+    $('fsave').disabled = false;
+  }
+  fb.text = ta.value;
+  fb.meta.mtime = r.mtime;
+  fb.dirty = false;
+  toast('저장했습니다');
+  if (stay) {
+    setEditUI(true);
+  } else {
+    fb.editing = false;
+    renderFile();
+  }
+}
+
+function cancelEdit() {
+  if (!confirmLeave()) return;
   renderFile();
 }
 
 function renderFile() {
   const body = $('fbody');
   const name = fb.file.split('/').pop();
+  fb.editing = false;
+  setEditUI(false);
   body.innerHTML = '';
   if (MD_EXT.test(name) && !fb.rawMd && window.marked && window.DOMPurify) {
     const div = document.createElement('div');
@@ -1322,7 +1438,16 @@ function insertPath(p) {
 }
 
 $('filesbtn').onclick = toggleFiles;
-$('fclose').onclick = () => { $('files').hidden = true; };
+$('fclose').onclick = closeFiles;
+$('fedit').onclick = startEdit;
+$('fsave').onclick = () => saveFile(false);
+$('fcancel').onclick = cancelEdit;
+window.addEventListener('beforeunload', (e) => {
+  if (fb.editing && fb.dirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 $('fback').onclick = () => listDir(fb.path);
 $('finsert').onclick = () => fb.file && insertPath(fb.file);
 $('fmdtoggle').onclick = () => {

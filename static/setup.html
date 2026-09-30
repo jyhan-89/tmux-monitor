@@ -10,9 +10,13 @@
   :root { --bg:#1e1f22; --panel:#26282c; --line:#35373c; --fg:#d7d9dd; --dim:#8b8f97; --accent:#4f9cf9; --err:#f07178; --warn:#f0b35a; --ok:#4cc38a; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
-  body { display:flex; align-items:center; justify-content:center; padding:16px; }
-  form { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:28px 24px; display:flex; flex-direction:column; gap:14px; }
-  h1 { margin:0 0 4px; font-size:18px; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:16px; min-height:100%; height:auto; }
+  .card { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:28px 24px; display:flex; flex-direction:column; gap:14px; }
+  h1, h2 { margin:0 0 4px; font-size:18px; }
+  h2 { font-size:16px; }
+  label.chk { flex-direction:row; align-items:center; gap:8px; color:var(--fg); font-size:14px; cursor:pointer; }
+  label.chk input { width:18px; height:18px; margin:0; }
+  #srvmsg { min-height:18px; font-size:13px; }
   p { margin:0; color:var(--dim); font-size:13px; line-height:1.5; }
   p.warn { color:var(--warn); }
   p.ok { color:var(--ok); }
@@ -29,7 +33,7 @@
 </style>
 </head>
 <body>
-<form id="f">
+<form id="f" class="card">
   <h1 id="title">계정 설정</h1>
   <p id="desc">확인 중…</p>
   <label>아이디 <input id="u" autocomplete="username" required disabled></label>
@@ -39,9 +43,42 @@
   <button id="b" disabled>저장</button>
   <p><a href="login">로그인 화면으로</a></p>
 </form>
+<section id="srv" class="card" hidden>
+  <h2>서버 설정</h2>
+  <label class="chk"><input type="checkbox" id="fileedit"> 파일 탐색에서 파일 수정 허용</label>
+  <p>켜면 로그인한 모든 기기에서 홈 폴더 아래 텍스트 파일을 편집·저장할 수 있습니다. 끄면 읽기 전용입니다.</p>
+  <div id="srvmsg"></div>
+</section>
 <script>
 const base = location.pathname.replace(/\/setup\/?$/, '');
 const $ = (id) => document.getElementById(id);
+
+fetch(`${base}/api/settings`).then((r) => r.json()).then((s) => {
+  if (!s.local) return;
+  $('fileedit').checked = s.file_edit;
+  $('srv').hidden = false;
+}).catch(() => {});
+
+$('fileedit').onchange = async () => {
+  const want = $('fileedit').checked;
+  $('fileedit').disabled = true;
+  try {
+    const res = await fetch(`${base}/api/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_edit: want }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '저장 실패');
+    $('srvmsg').style.color = 'var(--ok)';
+    $('srvmsg').textContent = want ? '파일 수정을 켰습니다' : '파일 수정을 껐습니다 (읽기 전용)';
+  } catch (e) {
+    $('fileedit').checked = !want;
+    $('srvmsg').style.color = 'var(--err)';
+    $('srvmsg').textContent = e.message;
+  } finally {
+    $('fileedit').disabled = false;
+  }
+};
 
 fetch(`${base}/api/setup`).then((r) => r.json()).then((s) => {
   $('title').textContent = s.configured ? '아이디/비밀번호 변경' : '처음 계정 만들기';

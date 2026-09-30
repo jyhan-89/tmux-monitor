@@ -12,6 +12,7 @@ Free for personal, educational, research and other noncommercial use — see [Li
 - 탭·분할 화면, 자동 재연결, 한글 입력창, 모바일 특수키·제스처, 홈 화면 앱(PWA)
 - 세션 생성(작업 폴더·시작 명령)·이름 변경·종료, tmux 창/패널 전환
 - 정렬, 그룹(드래그로 이동), 파일 업로드, 화면 내용 복사
+- 파일 탐색: 홈 폴더 아래 폴더 탐색, Markdown 문서·코드(문법 색상) 보기, 선택적으로 파일 수정
 
 ## 설치
 
@@ -48,6 +49,16 @@ python3 -m venv .venv
 
 - 서버 PC에서 localhost 주소로 접속했을 때만 허용 (외부 IP, 프록시 헤더 위조, DNS 리바인딩 차단)
 - 터미널에서는 `.venv/bin/python auth.py [아이디]` 로도 설정 가능
+
+## 파일 탐색 / 수정
+
+상단 📂 버튼으로 홈 폴더 아래 파일을 탐색한다. 기본은 **읽기 전용**이다.
+
+- 파일 수정은 서버 PC의 `http://localhost:8765/dev/setup` → **서버 설정 → 파일 수정 허용**에서 켜고 끈다
+  (계정 설정처럼 서버 PC에서 localhost로 접속했을 때만 변경 가능)
+- 켜면 텍스트 파일 보기 화면에 **수정** 버튼이 생긴다. `Ctrl+S` 저장, 원래 인코딩(UTF-8/EUC-KR)과 줄바꿈(LF/CRLF) 유지,
+  다른 곳에서 먼저 바뀐 파일은 덮어쓰기 전에 확인
+- 볼 수 있는 범위는 `TMUX_WEB_FILES_ROOT` 환경변수로 바꿀 수 있다 (기본: 홈 폴더)
 
 ## 외부에서 접속하기 (Tailscale 등)
 

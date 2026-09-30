@@ -157,6 +157,8 @@ dialog.big[open] { display:flex; flex-direction:column; }
 a.btn { background:#34373d; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 10px; text-decoration:none; font-size:14px; }
 a.btn:hover { border-color:var(--accent); }
 #fbody { flex:1; min-height:0; overflow:auto; }
+#fbody.editing { overflow:hidden; display:flex; }
+#feditor { flex:1; width:100%; margin:0; border:0; resize:none; outline:none; background:var(--bg); color:var(--fg); padding:10px 12px; font:13px/1.55 ui-monospace, "D2Coding", monospace; tab-size:4; white-space:pre; overflow:auto; }
 .flist { list-style:none; margin:0; padding:4px; }
 .flist li { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; cursor:pointer; }
 .flist li:hover { background:#2f3237; }
@@ -200,4 +202,5 @@ a.btn:hover { border-color:var(--accent); }
   #sessions li { padding:12px 10px; }
   dialog input, dialog select { font-size:16px; }
   #files { width:100%; border-left:0; }
+  #feditor { font-size:16px; }
 }

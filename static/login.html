@@ -49,7 +49,7 @@ fetch(`${base}/api/setup`).then((r) => r.json()).then((s) => {
       ? '계정이 아직 없습니다. <a href="setup">계정 만들기</a>'
       : '계정이 아직 없습니다. 서버 PC에서 <b>http://localhost:8765/dev/setup</b> 을 열어 만드세요';
   } else if (s.local) {
-    hint.innerHTML = '<a href="setup">아이디/비밀번호 변경</a> (이 PC에서만 가능)';
+    hint.innerHTML = '<a href="setup">계정·서버 설정</a> (이 PC에서만 가능)';
   } else {
     return;
   }

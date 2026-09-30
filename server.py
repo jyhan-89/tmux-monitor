@@ -4,8 +4,10 @@ import json
 import os
 import pty
 import re
+import shutil
 import signal
 import struct
+import tempfile
 import termios
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -186,6 +188,29 @@ def api_setup(body: Setup, request: Request):
         raise HTTPException(400, "비밀번호는 8자 이상이어야 합니다")
     auth.set_password(username, body.password)
     return {"ok": True}
+
+
+def file_edit_enabled() -> bool:
+    return bool(store.load_config().get("file_edit", False))
+
+
+@router.get("/api/settings")
+def api_settings(request: Request):
+    return {"file_edit": file_edit_enabled(), "local": is_local(request)}
+
+
+class Settings(BaseModel):
+    file_edit: bool
+
+
+@router.post("/api/settings")
+def api_save_settings(body: Settings, request: Request):
+    if not is_local(request):
+        raise HTTPException(403, "서버 설정은 이 PC에서 localhost 주소로 접속했을 때만 바꿀 수 있습니다")
+    cfg = store.load_config()
+    cfg["file_edit"] = body.file_edit
+    store.save_config(cfg)
+    return {"file_edit": body.file_edit}
 
 
 @router.post("/api/logout")
@@ -420,13 +445,13 @@ def api_files_list(path: str | None = None):
     }
 
 
-def decode_text(data: bytes) -> str:
+def decode_text(data: bytes) -> tuple[str, str | None]:
     for enc in ("utf-8", "cp949"):
         try:
-            return data.decode(enc)
+            return data.decode(enc), enc
         except UnicodeDecodeError:
             pass
-    return data.decode("utf-8", errors="replace")
+    return data.decode("utf-8", errors="replace"), None
 
 
 @api.get("/files/read")
@@ -434,15 +459,76 @@ def api_files_read(path: str):
     f = safe_path(path)
     if not f.is_file():
         raise HTTPException(400, "파일이 아닙니다")
-    size = f.stat().st_size
+    st = f.stat()
     try:
         with open(f, "rb") as fh:
             data = fh.read(MAX_TEXT)
     except PermissionError:
         raise HTTPException(403, "파일을 읽을 권한이 없습니다")
     if b"\x00" in data[:8192]:
-        return {"path": str(f), "size": size, "binary": True}
-    return {"path": str(f), "size": size, "binary": False, "truncated": size > MAX_TEXT, "text": decode_text(data)}
+        return {"path": str(f), "size": st.st_size, "binary": True}
+    text, encoding = decode_text(data)
+    truncated = st.st_size > MAX_TEXT
+    return {
+        "path": str(f),
+        "size": st.st_size,
+        "binary": False,
+        "truncated": truncated,
+        "text": text,
+        "mtime": st.st_mtime_ns,
+        "encoding": encoding,
+        "newline": "\r\n" if b"\r\n" in data else "\n",
+        "editable": file_edit_enabled() and not truncated and encoding is not None and os.access(f, os.W_OK),
+    }
+
+
+class FileWrite(BaseModel):
+    path: str
+    text: str
+    mtime: int | None = None
+    encoding: str = "utf-8"
+    newline: str = "\n"
+
+
+@api.put("/files/write")
+def api_files_write(body: FileWrite):
+    if not file_edit_enabled():
+        raise HTTPException(403, "파일 수정이 꺼져 있습니다. 서버 PC의 설정 화면(/dev/setup)에서 켤 수 있습니다")
+    f = safe_path(body.path)
+    if not f.is_file():
+        raise HTTPException(400, "파일이 아닙니다")
+    if body.encoding not in ("utf-8", "cp949") or body.newline not in ("\n", "\r\n"):
+        raise HTTPException(400, "지원하지 않는 인코딩/줄바꿈입니다")
+    if body.mtime is not None and f.stat().st_mtime_ns != body.mtime:
+        raise HTTPException(409, "다른 곳에서 파일이 바뀌었습니다")
+    text = body.text.replace("\r\n", "\n")
+    if body.newline == "\r\n":
+        text = text.replace("\n", "\r\n")
+    try:
+        data = text.encode(body.encoding)
+    except UnicodeEncodeError:
+        raise HTTPException(400, f"{body.encoding.upper()}로 저장할 수 없는 글자가 들어 있습니다")
+    if len(data) > MAX_TEXT:
+        raise HTTPException(413, "파일이 너무 큽니다 (최대 2MB)")
+    try:
+        fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.name}.", suffix=".tmp")
+    except PermissionError:
+        fd = None
+    try:
+        if fd is None:
+            with open(f, "wb") as fh:
+                fh.write(data)
+        else:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+            shutil.copymode(f, tmp)
+            os.replace(tmp, f)
+    except PermissionError:
+        raise HTTPException(403, "파일을 쓸 권한이 없습니다")
+    finally:
+        if fd is not None and os.path.exists(tmp):
+            os.unlink(tmp)
+    return {"mtime": f.stat().st_mtime_ns, "size": len(data)}
 
 
 @api.get("/files/raw")
