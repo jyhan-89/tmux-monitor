@@ -6,7 +6,10 @@ TLS_DIR="${TMUX_WEB_TLS:-$CONFIG_DIR/tls}"
 PORT="${PORT:-8765}"
 
 ASSUME_YES=0
-WITH_NGINX=1
+# 설치 방식: lan   = 로컬 네트워크 서버 (앱이 0.0.0.0:PORT 에서 직접 응답, HTTP)
+#            https = nginx + 자체 인증서 (앱은 127.0.0.1, nginx가 443에서 HTTPS)
+#            local = 이 PC에서만 (127.0.0.1:PORT)
+MODE=lan
 WITH_SERVICE=1
 
 if [[ -t 1 ]]; then
@@ -32,8 +35,13 @@ ask() {
 usage() {
   cat <<EOF
 사용법: $0 [옵션]
+설치 방식 (하나 선택, 기본: 로컬 네트워크 서버)
+  (없음)           로컬 네트워크 서버: 같은 네트워크 기기에서 http://<IP>:$PORT/dev 로 접속
+  --https          nginx + 자체 인증서로 https://<IP>/dev (알림·홈 화면 앱 사용 가능)
+  --local          이 PC에서만: http://localhost:$PORT/dev
+
+기타
   -y, --yes        모든 질문에 '예'로 진행 (계정 만들기는 제외)
-  --no-nginx       nginx/HTTPS 설정 생략 (http://localhost:$PORT/dev 로만 사용)
   --no-service     상시 실행(자동 시작) 등록 생략
   -h, --help       도움말
 EOF
@@ -43,7 +51,8 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -y|--yes) ASSUME_YES=1 ;;
-      --no-nginx) WITH_NGINX=0 ;;
+      --https) MODE=https ;;
+      --local) MODE=local ;;
       --no-service) WITH_SERVICE=0 ;;
       -h|--help) usage; exit 0 ;;
       *) usage; die "알 수 없는 옵션: $1" ;;
@@ -121,16 +130,26 @@ wait_healthy() {
   return 1
 }
 
+# 앱이 받을 주소: lan 모드만 네트워크 전체, 나머지는 이 PC(nginx가 앞단)
+app_host() { [[ $MODE == lan ]] && echo 0.0.0.0 || echo 127.0.0.1; }
+
 summary() {
-  local ips="$1"
+  local ips="$1" ip
   step "완료"
-  if [[ $WITH_NGINX == 1 ]]; then
-    for ip in $ips; do info "https://$ip/dev"; done
-    info "https://localhost/dev  (이 PC)"
-    echo
-    info "다른 기기에서 경고가 뜨면 http://<IP>/dev/ca.crt 를 받아 CA로 설치하세요"
-  else
-    info "http://localhost:$PORT/dev"
-  fi
+  case "$MODE" in
+    https)
+      for ip in $ips; do info "https://$ip/dev"; done
+      info "https://localhost/dev  (이 PC)"
+      echo
+      info "다른 기기에서 경고가 뜨면 http://<IP>/dev/ca.crt 를 받아 CA로 설치하세요" ;;
+    lan)
+      for ip in $ips; do info "http://$ip:$PORT/dev"; done
+      info "http://localhost:$PORT/dev  (이 PC)"
+      echo
+      info "HTTP라서 주소창에 '안전하지 않음'이 표시되고, 푸시 알림·홈 화면 앱 설치는 안 됩니다"
+      info "필요하면 --https 옵션으로 다시 실행하세요" ;;
+    local)
+      info "http://localhost:$PORT/dev" ;;
+  esac
   [[ -f "$CONFIG_DIR/auth.json" ]] || warn "계정 만들기: 이 PC에서 http://localhost:$PORT/dev/setup"
 }

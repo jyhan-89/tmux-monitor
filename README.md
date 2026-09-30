@@ -9,16 +9,23 @@
 
 ## 설치
 
-설치 스크립트가 패키지, Python 환경, 계정, 자동 시작, HTTPS(nginx + 자체 인증서)까지 한 번에 구성한다.
-여러 번 실행해도 안전하다.
+설치 스크립트가 패키지, Python 환경, 계정, 자동 시작까지 한 번에 구성한다. 여러 번 실행해도 안전하다.
 
 ```bash
-install/ubuntu.sh     # Ubuntu/Debian: apt, systemd 사용자 서비스, /etc/nginx
-install/macos.sh      # macOS: Homebrew, launchd 에이전트, brew nginx
+install/ubuntu.sh     # Ubuntu/Debian: apt, systemd 사용자 서비스
+install/macos.sh      # macOS: Homebrew, launchd 에이전트
 ```
 
-옵션: `-y` 질문에 모두 예, `--no-nginx` HTTPS 없이 `http://localhost:8765/dev` 만, `--no-service` 자동 시작 등록 생략.
-포트를 바꾸려면 `PORT=9000 install/ubuntu.sh`.
+| 설치 방식 | 옵션 | 접속 주소 |
+|---|---|---|
+| 로컬 네트워크 서버 (기본) | 없음 | `http://<IP>:8765/dev` |
+| HTTPS (nginx + 자체 인증서) | `--https` | `https://<IP>/dev` |
+| 이 PC에서만 | `--local` | `http://localhost:8765/dev` |
+
+기본 방식은 HTTP라서 브라우저 주소창에 '안전하지 않음'이 표시되고, 푸시 알림·붙여넣기 버튼·홈 화면 앱 설치는
+HTTPS에서만 동작한다. 필요하면 `--https`로 다시 실행한다.
+
+기타 옵션: `-y` 질문에 모두 예, `--no-service` 자동 시작 등록 생략. 포트 변경: `PORT=9000 install/ubuntu.sh`.
 
 수동으로 실행만 하려면:
 
@@ -39,7 +46,7 @@ python3 -m venv .venv
 ## 배포 (deploy/)
 
 - `tmux-web.service`: systemd 사용자 서비스 (`~/.config/systemd/user/`에 복사 후 `systemctl --user enable --now tmux-web`)
-- `nginx-tmux-web.conf`: HTTPS 리버스 프록시 (`/dev` → 127.0.0.1:8765)
+- `nginx-tmux-web.conf`: HTTPS 리버스 프록시 (`/dev` → 127.0.0.1:8765), `--https` 설치 시 사용
 - `make-cert.sh`: IP 주소용 자체 CA/인증서 생성. 기기에는 `/dev/ca.crt`를 설치.
   IP가 바뀌면 설치 스크립트를 다시 실행하면 인증서가 새로 발급된다 (CA는 유지되므로 기기 재설치 불필요)
 

@@ -5,7 +5,10 @@
 #  2. Python 가상환경 + 의존성
 #  3. 로그인 계정
 #  4. launchd 사용자 에이전트 (로그인 시 자동 시작, 죽으면 재시작)
-#  5. 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
+#  5. 설치 방식별 네트워크 설정
+#     기본(로컬 네트워크 서버) : 앱이 0.0.0.0:8765 에서 직접 응답
+#     --https                  : 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
+#     --local                  : 이 Mac에서만 (127.0.0.1:8765)
 #
 # 여러 번 실행해도 안전 (이미 된 단계는 갱신만 함).
 set -euo pipefail
@@ -25,7 +28,7 @@ fi
 command -v brew >/dev/null || die "Homebrew가 없습니다. https://brew.sh 의 설치 명령을 먼저 실행하세요"
 BREW="$(brew --prefix)"
 pkgs=(tmux python openssl@3)
-[[ $WITH_NGINX == 1 ]] && pkgs+=(nginx)
+[[ $MODE == https ]] && pkgs+=(nginx)
 missing=()
 for p in "${pkgs[@]}"; do
   brew list --formula "$p" >/dev/null 2>&1 || missing+=("$p")
@@ -66,6 +69,7 @@ if [[ $WITH_SERVICE == 1 ]]; then
   <dict>
     <key>PATH</key><string>$BREW/bin:$BREW/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>LANG</key><string>${LANG:-ko_KR.UTF-8}</string>
+    <key>HOST</key><string>$(app_host)</string>
     <key>PORT</key><string>$PORT</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -83,8 +87,14 @@ else
   warn "상시 실행 생략: 필요할 때 $APP_DIR/run.sh 로 실행"
 fi
 
-# ---------- 5. nginx + HTTPS ----------
-if [[ $WITH_NGINX == 1 ]]; then
+# ---------- 5. 네트워크 ----------
+if [[ $MODE == lan ]]; then
+  step "로컬 네트워크 서버 (0.0.0.0:$PORT)"
+  info "macOS 방화벽이 켜져 있으면 'python이 들어오는 연결을 허용' 창이 뜰 수 있습니다 → 허용"
+  [[ $WITH_SERVICE == 1 ]] || warn "직접 실행할 때: HOST=0.0.0.0 $APP_DIR/run.sh"
+fi
+
+if [[ $MODE == https ]]; then
   make_cert
   step "nginx 설정 (80 → 443 HTTPS, /dev 프록시)"
   # brew nginx.conf 는 servers/* 를 include. 사용자 권한으로 실행되므로 인증서는 제자리에서 읽음

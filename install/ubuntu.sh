@@ -5,7 +5,10 @@
 #  2. Python 가상환경 + 의존성
 #  3. 로그인 계정
 #  4. systemd 사용자 서비스 (부팅 시 자동 시작: linger)
-#  5. 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
+#  5. 설치 방식별 네트워크 설정
+#     기본(로컬 네트워크 서버) : 앱이 0.0.0.0:8765 에서 직접 응답, 방화벽(ufw) 허용
+#     --https                  : 자체 CA 인증서 + nginx HTTPS (/dev → 127.0.0.1:8765)
+#     --local                  : 이 PC에서만 (127.0.0.1:8765)
 #
 # 여러 번 실행해도 안전 (이미 된 단계는 갱신만 함). sudo 비밀번호를 물을 수 있음.
 set -euo pipefail
@@ -18,7 +21,7 @@ command -v apt-get >/dev/null || die "apt-get이 없습니다. Ubuntu/Debian 계
 # ---------- 1. 패키지 ----------
 step "패키지 설치 (apt)"
 pkgs=(tmux python3 python3-venv openssl curl ca-certificates)
-[[ $WITH_NGINX == 1 ]] && pkgs+=(nginx)
+[[ $MODE == https ]] && pkgs+=(nginx)
 missing=()
 for p in "${pkgs[@]}"; do
   dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
@@ -40,9 +43,7 @@ if [[ $WITH_SERVICE == 1 ]]; then
   unit_dir="$HOME/.config/systemd/user"
   mkdir -p "$unit_dir"
   sed -e "s#%h/dev_monitor#$APP_DIR#g" "$APP_DIR/deploy/tmux-web.service" > "$unit_dir/tmux-web.service"
-  if [[ $PORT != 8765 ]]; then
-    sed -i "/^\[Service\]/a Environment=PORT=$PORT" "$unit_dir/tmux-web.service"
-  fi
+  sed -i "/^\[Service\]/a Environment=HOST=$(app_host)\nEnvironment=PORT=$PORT" "$unit_dir/tmux-web.service"
   systemctl --user daemon-reload
   systemctl --user enable tmux-web >/dev/null 2>&1
   systemctl --user restart tmux-web
@@ -58,8 +59,20 @@ else
   warn "상시 실행 생략: 필요할 때 $APP_DIR/run.sh 로 실행"
 fi
 
-# ---------- 5. nginx + HTTPS ----------
-if [[ $WITH_NGINX == 1 ]]; then
+# ---------- 5. 네트워크 ----------
+if [[ $MODE == lan ]]; then
+  step "로컬 네트워크 서버 (0.0.0.0:$PORT)"
+  if command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    if ask "방화벽(ufw)에서 $PORT 포트를 열까요?"; then
+      sudo ufw allow "$PORT/tcp" >/dev/null && ok "ufw: $PORT/tcp 허용"
+    else
+      warn "다른 기기에서 접속하려면: sudo ufw allow $PORT/tcp"
+    fi
+  fi
+  [[ $WITH_SERVICE == 1 ]] || warn "직접 실행할 때: HOST=0.0.0.0 $APP_DIR/run.sh"
+fi
+
+if [[ $MODE == https ]]; then
   make_cert
   step "nginx 설정 (80 → 443 HTTPS, /dev 프록시)"
   sudo install -m 600 -D "$TLS_DIR/server.key" /etc/nginx/ssl/tmux-web.key
