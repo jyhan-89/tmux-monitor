@@ -494,7 +494,7 @@ function createConn(name) {
   msg.className = 'pane-msg';
   msg.hidden = true;
   const host = document.createElement('div');
-  host.style.height = '100%';
+  host.className = 'phost';
   el.append(msg, host);
   $('paneholder').appendChild(el);
 
