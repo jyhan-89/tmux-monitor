@@ -604,6 +604,18 @@ function createConn(name) {
     return true;
   });
   el.addEventListener('mousedown', () => { if (activeName !== conn.name) activate(conn.name, false); });
+  term.parser.registerOscHandler(52, (data) => {
+    const b64 = data.slice(data.indexOf(';') + 1);
+    if (!b64 || b64 === '?') return true;
+    let text;
+    try {
+      text = new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
+    } catch {
+      return true;
+    }
+    copyText(text).then((ok) => toast(ok ? `복사했습니다 (${text.length}자)` : '복사 실패: 브라우저가 클립보드 접근을 막았습니다', 1500));
+    return true;
+  });
   host.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return;
     setTimeout(() => {
