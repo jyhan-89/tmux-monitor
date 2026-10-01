@@ -7,6 +7,7 @@ PORT="${PORT:-8765}"
 ASSUME_YES=0
 MODE=lan
 WITH_SERVICE=1
+WITH_PERSIST=0
 
 if [[ -t 1 ]]; then
   C_B=$'\e[1m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'
@@ -38,6 +39,7 @@ usage() {
 기타
   -y, --yes        모든 질문에 '예'로 진행 (계정 만들기는 제외)
   --no-service     상시 실행(자동 시작) 등록 생략
+  --with-persist   tmux-persist 함께 설치 (세션 5분마다 자동 저장, 재부팅·로그인 후 복원, 웹에서 저장/복원)
   -h, --help       도움말
 EOF
 }
@@ -49,6 +51,7 @@ parse_args() {
       --https) MODE=https ;;
       --local) MODE=local ;;
       --no-service) WITH_SERVICE=0 ;;
+      --with-persist) WITH_PERSIST=1 ;;
       -h|--help) usage; exit 0 ;;
       *) usage; die "알 수 없는 옵션: $1" ;;
     esac

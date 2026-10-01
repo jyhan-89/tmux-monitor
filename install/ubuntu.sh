@@ -80,4 +80,10 @@ if [[ $MODE == https ]]; then
   info "Chrome/Firefox는 브라우저 설정의 인증서 관리에서 $TLS_DIR/ca.crt 를 가져오세요"
 fi
 
+if [[ $WITH_PERSIST == 1 ]]; then
+  step "tmux-persist (세션 자동 저장, 재부팅 후 복원)"
+  "$APP_DIR/addons/tmux-persist/install.sh" | sed 's/^/    /'
+  ok "5분마다 자동 저장, 로그인(부팅) 시 자동 복원, 웹 화면 💾 에서 저장/복원"
+fi
+
 summary "$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(172\.17\.|192\.168\.122\.)|:' | xargs)"

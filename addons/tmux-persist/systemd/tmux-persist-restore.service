@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore tmux sessions saved by tmux-persist
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/tmux-persist restore
+ExecStop=%h/.local/bin/tmux-persist save -q
+
+[Install]
+WantedBy=default.target

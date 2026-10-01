@@ -1,0 +1,6 @@
+[Unit]
+Description=Save tmux sessions (tmux-persist)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/tmux-persist save -q

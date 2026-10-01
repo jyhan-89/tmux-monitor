@@ -160,6 +160,15 @@ dialog textarea { font:13px ui-monospace, monospace; resize:vertical; }
 #dirtree .dtw { flex:none; width:16px; text-align:center; color:var(--dim); }
 #dirtree .dname { overflow:hidden; text-overflow:ellipsis; }
 #dirtree .dmsg { padding:4px 6px; color:var(--dim); }
+#persistdlg { width:min(94vw, 640px); }
+#persistdlg .actions { margin:10px 0; }
+#persistlist { list-style:none; margin:0; padding:0; max-height:min(55dvh, 460px); overflow:auto; border:1px solid var(--line); border-radius:6px; }
+#persistlist li { display:flex; align-items:center; gap:10px; padding:8px 10px; border-bottom:1px solid var(--line); }
+#persistlist li:last-child { border-bottom:0; }
+#persistlist .pt { flex:none; font:13px ui-monospace, monospace; }
+#persistlist .pn { flex:1; min-width:0; color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#persistlist .pl { flex:none; font-size:11px; color:var(--ok); border:1px solid currentColor; border-radius:9px; padding:0 6px; }
+#persistlist button { flex:none; padding:3px 10px; font-size:12px; }
 dialog .actions { display:flex; justify-content:flex-end; gap:8px; }
 dialog .actions button { padding:7px 14px; }
 dialog .actions.vertical { flex-direction:column; align-items:stretch; }

@@ -24,6 +24,7 @@
       <h1>tmux 세션</h1>
       <button id="new" title="새 세션">＋</button>
       <button id="refresh" title="새로고침">↻</button>
+      <button id="persistbtn" title="세션 저장/복원 (tmux-persist)">💾</button>
       <button id="notify" title="알림 켜기/끄기">🔕</button>
       <button id="logout" title="로그아웃">⏻</button>
     </header>
@@ -159,6 +160,19 @@
     <button id="groupdelkill" class="danger">세션도 모두 종료</button>
     <button type="button" data-close>취소</button>
   </div>
+</dialog>
+
+<dialog id="persistdlg">
+  <div class="dlghead">
+    <h2>세션 저장 / 복원</h2>
+    <button type="button" data-close>닫기</button>
+  </div>
+  <p class="hint" id="persiststatus"></p>
+  <div class="actions" style="justify-content:flex-start">
+    <button id="persistsave" class="primary">지금 저장</button>
+    <button id="persistrestore">최신 스냅샷에서 복원</button>
+  </div>
+  <ul id="persistlist"></ul>
 </dialog>
 
 <dialog id="copydlg" class="big">

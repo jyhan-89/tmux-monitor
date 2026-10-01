@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+"""tmux-persist: save tmux sessions and restore them after a reboot.
+
+Usage:
+  tmux-persist save                 snapshot every session/window/pane
+  tmux-persist restore [SNAPSHOT]   recreate sessions from the latest (or given) snapshot
+  tmux-persist list                 list stored snapshots
+
+Options are read from tmux (set them in ~/.tmux.conf):
+  @persist-processes     programs to relaunch on restore (basename match, ":all:" for everything)
+  @persist-capture-lines lines of pane history to save and redraw (0 disables)
+  @persist-keep          number of snapshots to keep
+
+Environment:
+  TMUX_PERSIST_DIR       storage directory (default ~/.local/share/tmux-persist)
+  TMUX_PERSIST_SOCKET    tmux socket name to use (tmux -L), mainly for testing
+"""
+
+
+import fcntl
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_PROCESSES = "vi vim nvim nano emacs man less more tail top htop btop watch ssh claude"
+DEFAULT_CAPTURE_LINES = 1000
+DEFAULT_KEEP = 20
+SEP = "\x1f"
+
+DATA_DIR = Path(os.environ.get("TMUX_PERSIST_DIR") or
+                Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "tmux-persist")
+SNAP_DIR = DATA_DIR / "snapshots"
+CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+LAST_LINK = DATA_DIR / "last"
+
+
+class TmuxError(Exception):
+    pass
+
+
+def tmux(*args, check=True):
+    cmd = ["tmux", "-u"]
+    if os.environ.get("TMUX_PERSIST_SOCKET"):
+        cmd += ["-L", os.environ["TMUX_PERSIST_SOCKET"]]
+    p = subprocess.run(cmd + list(args), capture_output=True, text=True)
+    if check and p.returncode != 0:
+        raise TmuxError(f"tmux {' '.join(args)}: {p.stderr.strip()}")
+    return p.stdout
+
+
+def server_running():
+    try:
+        tmux("list-sessions")
+        return True
+    except TmuxError:
+        return False
+
+
+def option(name, default):
+    try:
+        val = tmux("show-options", "-gqv", name).strip()
+    except TmuxError:
+        val = ""
+    return val if val else default
+
+
+def foreground_process_ps(pane_pid):
+    def ps(field, pid):
+        out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(pid)], capture_output=True, text=True)
+        return out.stdout.strip()
+
+    try:
+        tpgid = int(ps("tpgid", pane_pid))
+        if tpgid <= 0 or tpgid == pane_pid:
+            return None, None
+        argv = shlex.split(ps("command", tpgid))
+    except (OSError, ValueError):
+        return None, None
+    return (tpgid, argv) if argv else (None, None)
+
+
+def foreground_process(pane_pid):
+    if not os.path.isdir("/proc"):
+        return foreground_process_ps(pane_pid)
+    try:
+        stat = Path(f"/proc/{pane_pid}/stat").read_text()
+        tpgid = int(stat[stat.rindex(")") + 2:].split()[5])
+        if tpgid <= 0 or tpgid == pane_pid:
+            return None, None
+        raw = Path(f"/proc/{tpgid}/cmdline").read_bytes()
+    except (OSError, ValueError, IndexError):
+        return None, None
+    argv = [a.decode(errors="replace") for a in raw.split(b"\0") if a]
+    return (tpgid, argv) if argv else (None, None)
+
+
+def is_claude(argv):
+    return argv is not None and os.path.basename(argv[0]) == "claude"
+
+
+def claude_session_id(pid):
+    try:
+        info = json.loads((CLAUDE_DIR / "sessions" / f"{pid}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if info.get("pid") != pid:
+        return None
+    return info.get("sessionId")
+
+
+def claude_resume_argv(argv, session_id):
+    has_transcript = any((CLAUDE_DIR / "projects").glob(f"*/{session_id}.jsonl"))
+    out, skip = [], False
+    for i, a in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        if a in ("-c", "--continue") or a.startswith("--resume=") or a.startswith("--session-id="):
+            continue
+        if a in ("-r", "--resume", "--session-id"):
+            skip = i + 1 < len(argv) and not argv[i + 1].startswith("-")
+            continue
+        out.append(a)
+    return out + ["--resume", session_id] if has_transcript else out
+
+
+def should_restore(argv, allowed):
+    if argv is None:
+        return False
+    if ":all:" in allowed:
+        return True
+    return os.path.basename(argv[0]).lstrip("-") in allowed
+
+
+class Lock:
+    def __enter__(self):
+        DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.f = open(DATA_DIR / ".lock", "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+PANE_FIELDS = [
+    "session_name", "window_index", "window_name", "window_layout", "window_active",
+    "window_zoomed_flag", "window_width", "window_height", "automatic-rename",
+    "session_attached", "session_grouped", "session_group", "pane_index", "pane_id", "pane_pid", "pane_active", "pane_current_path",
+]
+
+
+def collect(capture_lines, snap_tmp):
+    fmt = SEP.join(f"#{{{f}}}" for f in PANE_FIELDS)
+    sessions = {}
+    group_leader = {}
+    for line in tmux("list-panes", "-a", "-F", fmt).splitlines():
+        row = dict(zip(PANE_FIELDS, line.split(SEP)))
+        if len(row) != len(PANE_FIELDS):
+            continue
+        if row["session_grouped"] == "1":
+            leader = group_leader.setdefault(row["session_group"], row["session_name"])
+            if leader != row["session_name"]:
+                sessions.setdefault(row["session_name"], {"name": row["session_name"], "group_with": leader})
+                continue
+        s = sessions.setdefault(row["session_name"], {"name": row["session_name"], "windows": {}})
+        widx = int(row["window_index"])
+        w = s["windows"].setdefault(widx, {
+            "index": widx,
+            "name": row["window_name"],
+            "layout": row["window_layout"],
+            "active": row["window_active"] == "1",
+            "zoomed": row["window_zoomed_flag"] == "1",
+            "automatic_rename": row["automatic-rename"] == "on",
+            "width": int(row["window_width"]),
+            "height": int(row["window_height"]),
+            "panes": [],
+        })
+        fg_pid, argv = foreground_process(int(row["pane_pid"]))
+        pane = {
+            "index": int(row["pane_index"]),
+            "cwd": row["pane_current_path"],
+            "active": row["pane_active"] == "1",
+            "argv": argv,
+            "content": None,
+        }
+        if is_claude(argv):
+            pane["claude_session"] = claude_session_id(fg_pid)
+        if capture_lines > 0:
+            text = tmux("capture-pane", "-p", "-e", "-J", "-S", f"-{capture_lines}",
+                        "-t", row["pane_id"], check=False).rstrip("\n ")
+            if text.strip():
+                name = f"{row['pane_id'].lstrip('%')}.txt"
+                (snap_tmp / "panes" / name).write_text(text + "\n")
+                pane["content"] = name
+        w["panes"].append(pane)
+
+    result = []
+    for s in sessions.values():
+        if "group_with" in s:
+            result.append(s)
+            continue
+        wins = sorted(s["windows"].values(), key=lambda w: w["index"])
+        for w in wins:
+            w["panes"].sort(key=lambda p: p["index"])
+        result.append({"name": s["name"], "windows": wins})
+    return result
+
+
+def cmd_save(quiet=False):
+    if not server_running():
+        if not quiet:
+            print("tmux server not running; nothing saved")
+        return 0
+    with Lock():
+        SNAP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        final = SNAP_DIR / stamp
+        tmp = SNAP_DIR / f".{stamp}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        (tmp / "panes").mkdir(parents=True, mode=0o700)
+        try:
+            capture = int(option("@persist-capture-lines", DEFAULT_CAPTURE_LINES))
+            sessions = collect(capture, tmp)
+            if not sessions:
+                shutil.rmtree(tmp)
+                if not quiet:
+                    print("no sessions; nothing saved")
+                return 0
+            state = {
+                "version": 1,
+                "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "default_shell": option("default-shell", os.environ.get("SHELL", "/bin/sh")),
+                "sessions": sessions,
+            }
+            (tmp / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=False))
+            if final.exists():
+                shutil.rmtree(final)
+            tmp.rename(final)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+        link_tmp = DATA_DIR / ".last.tmp"
+        if link_tmp.is_symlink() or link_tmp.exists():
+            link_tmp.unlink()
+        link_tmp.symlink_to(Path("snapshots") / stamp)
+        link_tmp.replace(LAST_LINK)
+
+        keep = max(1, int(option("@persist-keep", DEFAULT_KEEP)))
+        snaps = sorted(p for p in SNAP_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
+        for old in snaps[:-keep]:
+            shutil.rmtree(old, ignore_errors=True)
+
+    if not quiet:
+        n_win = sum(len(s.get("windows", [])) for s in sessions)
+        n_pane = sum(len(w["panes"]) for s in sessions for w in s.get("windows", []))
+        print(f"saved {len(sessions)} sessions, {n_win} windows, {n_pane} panes -> {final}")
+    return 0
+
+
+def pane_start_command(snap, pane, shell):
+    if not pane["content"]:
+        return []
+    path = snap / "panes" / pane["content"]
+    if not path.exists():
+        return []
+    return [f"cat {shlex.quote(str(path))}; exec {shlex.quote(shell)} -l"]
+
+
+def cwd_of(pane):
+    return pane["cwd"] if pane["cwd"] and os.path.isdir(pane["cwd"]) else str(Path.home())
+
+
+def restore_session(sess, snap, shell, allowed):
+    name = sess["name"]
+    active_window = None
+    for i, win in enumerate(sess["windows"]):
+        panes = win["panes"]
+        first = panes[0]
+        size = ["-x", str(win["width"]), "-y", str(win["height"])]
+        if i == 0:
+            out = tmux("new-session", "-d", "-s", name, "-n", win["name"], "-c", cwd_of(first),
+                       *size, "-P", "-F", "#{window_index}" + SEP + "#{pane_id}",
+                       *pane_start_command(snap, first, shell))
+            widx, pid = out.strip().split(SEP)
+            if int(widx) != win["index"]:
+                tmux("move-window", "-s", f"={name}:{widx}", "-t", f"={name}:{win['index']}")
+        else:
+            pid = tmux("new-window", "-d", "-t", f"={name}:{win['index']}", "-n", win["name"],
+                       "-c", cwd_of(first), "-P", "-F", "#{pane_id}",
+                       *pane_start_command(snap, first, shell)).strip()
+        target = f"={name}:{win['index']}"
+        pane_ids = [pid]
+        for pane in panes[1:]:
+            pid = tmux("split-window", "-d", "-t", pane_ids[-1], "-c", cwd_of(pane),
+                       "-P", "-F", "#{pane_id}", *pane_start_command(snap, pane, shell)).strip()
+            pane_ids.append(pid)
+            tmux("select-layout", "-t", target, "tiled", check=False)
+        tmux("select-layout", "-t", target, win["layout"], check=False)
+        if win["automatic_rename"]:
+            tmux("set-option", "-w", "-t", target, "automatic-rename", "on", check=False)
+
+        active_pane = pane_ids[0]
+        for pane, pid in zip(panes, pane_ids):
+            if pane["active"]:
+                active_pane = pid
+            if should_restore(pane["argv"], allowed):
+                argv = pane["argv"]
+                if is_claude(argv) and pane.get("claude_session"):
+                    argv = claude_resume_argv(argv, pane["claude_session"])
+                tmux("send-keys", "-t", pid, "-l", shlex.join(argv), check=False)
+                tmux("send-keys", "-t", pid, "Enter", check=False)
+        tmux("select-pane", "-t", active_pane, check=False)
+        if win["zoomed"] and len(pane_ids) > 1:
+            tmux("resize-pane", "-Z", "-t", active_pane, check=False)
+        if win["active"]:
+            active_window = target
+    if active_window:
+        tmux("select-window", "-t", active_window, check=False)
+
+
+def resolve_snapshot(arg):
+    if arg:
+        p = Path(arg)
+        if not p.is_dir():
+            p = SNAP_DIR / arg
+    else:
+        p = LAST_LINK
+    if not (p / "state.json").exists():
+        return None
+    return p.resolve()
+
+
+def cmd_restore(arg=None):
+    snap = resolve_snapshot(arg)
+    if snap is None:
+        print(f"no snapshot found ({arg or LAST_LINK})", file=sys.stderr)
+        return 1 if arg else 0
+    with Lock():
+        state = json.loads((snap / "state.json").read_text())
+        existing = set(tmux("list-sessions", "-F", "#{session_name}").split("\n")) \
+            if server_running() else set()
+        tmux("start-server", check=False)
+        allowed = set(option("@persist-processes", DEFAULT_PROCESSES).split())
+        shell = state.get("default_shell") or os.environ.get("SHELL", "/bin/sh")
+        restored, skipped = [], []
+        for sess in sorted(state["sessions"], key=lambda s: "group_with" in s):
+            if sess["name"] in existing:
+                skipped.append(sess["name"])
+                continue
+            try:
+                if "group_with" in sess:
+                    tmux("new-session", "-d", "-s", sess["name"], "-t", f"={sess['group_with']}")
+                else:
+                    restore_session(sess, snap, shell, allowed)
+                restored.append(sess["name"])
+            except TmuxError as e:
+                print(f"failed to restore session {sess['name']!r}: {e}", file=sys.stderr)
+    print(f"restored {len(restored)} sessions from {snap.name}"
+          + (f" (skipped existing: {', '.join(skipped)})" if skipped else ""))
+    return 0
+
+
+def cmd_list():
+    if not SNAP_DIR.is_dir():
+        print("no snapshots")
+        return 0
+    last = LAST_LINK.resolve() if LAST_LINK.exists() else None
+    for p in sorted(SNAP_DIR.iterdir()):
+        if not (p / "state.json").exists():
+            continue
+        st = json.loads((p / "state.json").read_text())
+        names = ", ".join(s["name"] for s in st["sessions"])
+        mark = "*" if p.resolve() == last else " "
+        print(f"{mark} {p.name}  {len(st['sessions'])} sessions: {names}")
+    return 0
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    cmd, rest = argv[1], argv[2:]
+    try:
+        if cmd == "save":
+            return cmd_save(quiet="-q" in rest)
+        if cmd == "restore":
+            return cmd_restore(rest[0] if rest else None)
+        if cmd == "list":
+            return cmd_list()
+    except TmuxError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"unknown command: {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

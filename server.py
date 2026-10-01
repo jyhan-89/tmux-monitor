@@ -7,6 +7,7 @@ import re
 import shutil
 import signal
 import struct
+import subprocess
 import tempfile
 import termios
 from contextlib import asynccontextmanager
@@ -727,6 +728,81 @@ def api_files_raw(path: str, download: bool = False):
     if download:
         return FileResponse(f, filename=f.name, headers=headers)
     return FileResponse(f, headers=headers, content_disposition_type="inline", filename=f.name)
+
+
+PERSIST_DIR = Path(
+    os.environ.get("TMUX_PERSIST_DIR")
+    or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "tmux-persist"
+)
+
+
+def persist_bin() -> str | None:
+    for cand in (
+        os.environ.get("TMUX_PERSIST_BIN"),
+        shutil.which("tmux-persist"),
+        str(Path.home() / ".local/bin/tmux-persist"),
+        str(Path(__file__).parent / "addons/tmux-persist/tmux-persist"),
+    ):
+        if cand and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def persist_auto() -> bool:
+    if shutil.which("systemctl"):
+        r = subprocess.run(["systemctl", "--user", "is-active", "tmux-persist-save.timer"], capture_output=True, text=True)
+        return r.stdout.strip() == "active"
+    if shutil.which("launchctl"):
+        r = subprocess.run(["launchctl", "list", "kr.tmuxweb.persist-save"], capture_output=True, text=True)
+        return r.returncode == 0
+    return False
+
+
+def run_persist(*args: str) -> str:
+    b = persist_bin()
+    if not b:
+        raise HTTPException(404, "tmux-persist가 설치되어 있지 않습니다 (install 스크립트를 --with-persist 로 실행)")
+    env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    r = subprocess.run([b, *args], capture_output=True, text=True, env=env, timeout=120)
+    out = (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        raise HTTPException(500, out or "tmux-persist 실행 실패")
+    return out
+
+
+@api.get("/persist")
+def api_persist():
+    snaps = []
+    snap_dir = PERSIST_DIR / "snapshots"
+    last = (PERSIST_DIR / "last").resolve() if (PERSIST_DIR / "last").exists() else None
+    if snap_dir.is_dir():
+        for p in sorted(snap_dir.iterdir(), reverse=True)[:100]:
+            try:
+                st = json.loads((p / "state.json").read_text())
+            except (OSError, ValueError):
+                continue
+            names = [x.get("name", "") for x in st.get("sessions", [])]
+            snaps.append({"name": p.name, "sessions": names, "latest": p.resolve() == last})
+    return {"installed": persist_bin() is not None, "auto": persist_auto(), "snapshots": snaps}
+
+
+@api.post("/persist/save")
+def api_persist_save():
+    return {"output": run_persist("save")}
+
+
+class PersistRestore(BaseModel):
+    snapshot: str | None = None
+
+
+@api.post("/persist/restore")
+def api_persist_restore(body: PersistRestore):
+    args = ["restore"]
+    if body.snapshot:
+        if not re.fullmatch(r"[0-9A-Za-z_.-]+", body.snapshot) or not (PERSIST_DIR / "snapshots" / body.snapshot).is_dir():
+            raise HTTPException(400, "스냅샷이 없습니다")
+        args.append(body.snapshot)
+    return {"output": run_persist(*args)}
 
 
 class Config(BaseModel):

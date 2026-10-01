@@ -96,5 +96,52 @@ if [[ $MODE == https ]]; then
   fi
 fi
 
+if [[ $WITH_PERSIST == 1 ]]; then
+  step "tmux-persist (세션 자동 저장, 로그인 후 복원)"
+  PD="$APP_DIR/addons/tmux-persist"
+  mkdir -p "$HOME/.local/bin" "$HOME/.config/tmux-persist" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+  install -m 755 "$PD/tmux-persist" "$HOME/.local/bin/tmux-persist"
+  install -m 644 "$PD/tmux-persist.conf" "$HOME/.config/tmux-persist/tmux-persist.conf"
+  line="source-file -q ~/.config/tmux-persist/tmux-persist.conf"
+  grep -qF "$line" "$HOME/.tmux.conf" 2>/dev/null || echo "$line" >> "$HOME/.tmux.conf"
+  for job in save restore; do
+    label="kr.tmuxweb.persist-$job"
+    plist="$HOME/Library/LaunchAgents/$label.plist"
+    if [[ $job == save ]]; then
+      when="<key>StartInterval</key><integer>300</integer>"
+    else
+      when="<key>RunAtLoad</key><true/>"
+    fi
+    cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>$HOME/.local/bin/tmux-persist</string>
+    <string>$job</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$BREW/bin:$BREW/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key><string>${LANG:-ko_KR.UTF-8}</string>
+  </dict>
+  $when
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/tmux-persist.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tmux-persist.log</string>
+</dict>
+</plist>
+PLIST
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  done
+  PATH="$BREW/bin:$PATH" "$PY" "$HOME/.local/bin/tmux-persist" save -q || true
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/kr.tmuxweb.persist-save.plist"
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/kr.tmuxweb.persist-restore.plist" 2>/dev/null || true
+  ok "5분마다 자동 저장, 로그인 시 자동 복원, 웹 화면 💾 에서 저장/복원 (로그: ~/Library/Logs/tmux-persist.log)"
+fi
+
 ips="$(ifconfig | awk '/inet /{print $2}' | grep -vE '^(127\.|172\.17\.|192\.168\.122\.)' | xargs)"
 summary "$ips"

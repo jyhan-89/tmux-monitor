@@ -14,6 +14,7 @@ Free for personal, educational, research and other noncommercial use — see [Li
 - 세션 생성(작업 폴더·시작 명령)·이름 변경·종료, tmux 창/패널 전환
 - 정렬, 그룹(드래그로 이동), 파일 업로드, 화면 내용 복사(드래그 선택 시 자동 복사)
 - 파일 탐색: 홈 폴더 아래 폴더 탐색, Markdown 문서·코드(문법 색상) 보기, 선택적으로 파일 수정
+- 세션 저장/복원(tmux-persist 애드온): 5분마다 자동 저장, 재부팅 후 복원(Claude 대화는 `--resume`으로 이어서), 웹에서 스냅샷 복원
 
 ## 설치
 
@@ -42,6 +43,20 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ./run.sh                         # http://127.0.0.1:8765/dev/
 ```
+
+## 세션 저장 / 복원 (tmux-persist)
+
+`addons/tmux-persist/`는 재부팅해도 tmux 세션(창·패널 배치, 작업 폴더, 화면 내용, 실행 중이던 프로그램)을
+다시 열어 주는 애드온이다. Claude Code는 패널마다 대화 ID를 저장해 두었다가 `claude --resume <ID>`로 이어서 연다.
+
+```bash
+install/ubuntu.sh --with-persist     # 또는 install/macos.sh --with-persist
+```
+
+- 5분마다 자동 저장, 로그인(부팅) 시 자동 복원 (Ubuntu: systemd 타이머, macOS: launchd)
+- 웹 화면 세션 목록 위 💾 버튼: 지금 저장, 스냅샷 목록, 원하는 스냅샷에서 복원 (이미 있는 세션은 건너뜀)
+- 명령줄: `tmux-persist save | restore [스냅샷] | list`, tmux 안에서 `prefix + C-s` 저장 / `prefix + C-r` 복원
+- macOS는 실행 중인 프로그램을 `ps`로 확인한다 (Linux는 `/proc`)
 
 ## 계정 설정 / 초기화
 

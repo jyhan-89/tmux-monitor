@@ -273,6 +273,7 @@ function listMenu() {
   return [
     { label: '새 세션', run: () => openNewSession() },
     { label: '새 그룹', run: () => $('newgroup').click() },
+    { label: '세션 저장 / 복원', run: openPersist },
     '-',
     { label: '새로고침', run: refresh },
   ];
@@ -1540,6 +1541,82 @@ $('newform').addEventListener('submit', async (e) => {
   await refresh();
   openSession(name);
 });
+
+const snapTime = (n) => n.replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2}).*$/, '$1-$2-$3 $4:$5:$6');
+
+async function loadPersist() {
+  let r;
+  try {
+    r = await api('GET', '/persist');
+  } catch (e) {
+    $('persiststatus').textContent = e.message;
+    return;
+  }
+  const on = r.installed;
+  $('persistsave').disabled = !on;
+  $('persistrestore').disabled = !on || !r.snapshots.length;
+  $('persiststatus').textContent = !on
+    ? 'tmux-persist가 설치되어 있지 않습니다. 설치 스크립트를 --with-persist 옵션으로 실행하세요.'
+    : `자동 저장: ${r.auto ? '켜짐 (5분마다)' : '꺼짐'} · 스냅샷 ${r.snapshots.length}개 · 복원할 때 이미 있는 세션은 건너뜁니다`;
+  const ul = $('persistlist');
+  ul.innerHTML = '';
+  for (const sn of r.snapshots) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="pt"></span><span class="pn"></span><button>복원</button>';
+    li.querySelector('.pt').textContent = snapTime(sn.name);
+    li.querySelector('.pn').textContent = `${sn.sessions.length}개: ${sn.sessions.join(', ')}`;
+    li.querySelector('.pn').title = sn.sessions.join('\n');
+    if (sn.latest) {
+      const b = document.createElement('span');
+      b.className = 'pl';
+      b.textContent = '최신';
+      li.insertBefore(b, li.querySelector('button'));
+    }
+    li.querySelector('button').disabled = !on;
+    li.querySelector('button').onclick = () => restoreSnapshot(sn.name);
+    ul.appendChild(li);
+  }
+  if (!r.snapshots.length) {
+    const li = document.createElement('li');
+    li.className = 'pn';
+    li.textContent = '저장된 스냅샷이 없습니다';
+    ul.appendChild(li);
+  }
+}
+
+function openPersist() {
+  $('persiststatus').textContent = '불러오는 중…';
+  $('persistlist').innerHTML = '';
+  $('persistdlg').showModal();
+  loadPersist();
+}
+
+async function restoreSnapshot(name) {
+  const label = name ? snapTime(name) : '최신 스냅샷';
+  if (!confirm(`${label}에서 세션을 복원할까요? 이미 있는 세션은 건너뜁니다.`)) return;
+  try {
+    const r = await api('POST', '/persist/restore', { snapshot: name || null });
+    const m = /restored (\d+) sessions? from (\S+)(?: \(skipped existing: (.+)\))?/.exec(r.output || '');
+    toast(m ? `세션 ${m[1]}개를 복원했습니다${m[3] ? ` (이미 있어서 건너뜀: ${m[3]})` : ''}` : r.output || '복원했습니다', 6000);
+  } catch (e) {
+    return toast(`복원 실패: ${e.message}`, 6000);
+  }
+  refresh();
+  loadPersist();
+}
+
+$('persistbtn').onclick = openPersist;
+$('persistsave').onclick = async () => {
+  $('persistsave').disabled = true;
+  try {
+    await api('POST', '/persist/save');
+    toast('현재 세션을 저장했습니다');
+  } catch (e) {
+    toast(`저장 실패: ${e.message}`, 6000);
+  }
+  loadPersist();
+};
+$('persistrestore').onclick = () => restoreSnapshot(null);
 
 let swReg = null;
 
