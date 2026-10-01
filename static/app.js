@@ -2094,9 +2094,36 @@ for (const b of document.querySelectorAll('#fselbar [data-act]')) {
 window.addEventListener('resize', closeCtx);
 $('fbody').addEventListener('scroll', closeCtx);
 $('fbody').addEventListener('contextmenu', (e) => {
-  if (fb.file || !fb.path) return;
+  if (fb.editing) return;
+  if (fb.file) {
+    e.preventDefault();
+    const sel = window.getSelection().toString();
+    openCtx(e.clientX, e.clientY, [
+      { label: sel ? `선택 영역 복사 (${sel.length}자)` : '선택 영역 복사', disabled: !sel, run: () => copyToast(sel) },
+      { label: '파일 전체 복사', disabled: !fb.text, run: () => copyToast(fb.text) },
+      { label: '경로 복사', run: () => copyToast(fb.file, '경로를 복사했습니다') },
+      '-',
+      { label: '입력창에 경로 넣기', run: () => insertPath(fb.file) },
+    ]);
+    return;
+  }
+  if (!fb.path) return;
   e.preventDefault();
   openCtx(e.clientX, e.clientY, folderMenu());
+});
+
+function copyToast(text, msg) {
+  return copyText(text).then((ok) => toast(ok ? msg || `복사했습니다 (${text.length}자)` : '복사 실패', 1200));
+}
+
+$('fbody').addEventListener('mouseup', (e) => {
+  if (e.button !== 0 || !fb.file || fb.editing) return;
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const text = sel.toString();
+    if (!text.trim() || !$('fbody').contains(sel.anchorNode)) return;
+    copyToast(text);
+  }, 0);
 });
 $('fmenu').onclick = () => {
   const r = $('fmenu').getBoundingClientRect();
