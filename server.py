@@ -759,7 +759,7 @@ def api_dirs():
         if d not in seen and os.path.isdir(d):
             seen.add(d)
             dirs.append(d)
-    return dirs[:60]
+    return {"home": str(home), "root": str(FILES_ROOT), "dirs": dirs[:60]}
 
 
 @api.get("/push/key")

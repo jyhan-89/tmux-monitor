@@ -1308,20 +1308,115 @@ $('new').onclick = async () => {
     $('newcmd').value = last;
   }
   $('newcmd').hidden = sel.value !== 'custom';
-  const cur = sessions.find((s) => s.name === activeName);
-  $('newdir').value = cur?.path || '';
+  $('newdir').value = dirInfo.home;
   $('newname').placeholder = autoName($('newdir').value) || '폴더 이름으로 자동';
+  $('dirtree').hidden = true;
+  $('dirtree').innerHTML = '';
   $('newdlg').showModal();
   try {
-    const dirs = await api('GET', '/dirs');
+    const r = await api('GET', '/dirs');
+    const untouched = $('newdir').value === dirInfo.home;
+    dirInfo = r;
+    if (untouched) {
+      $('newdir').value = r.home;
+      $('newname').placeholder = autoName(r.home);
+    }
     $('dirlist').innerHTML = '';
-    for (const d of dirs) {
+    for (const d of r.dirs) {
       const o = document.createElement('option');
       o.value = d;
       $('dirlist').appendChild(o);
     }
   } catch {}
 };
+
+let dirInfo = { home: '', root: '', dirs: [] };
+
+function pickDir(path) {
+  $('newdir').value = path;
+  $('newname').placeholder = autoName(path) || '폴더 이름으로 자동';
+  for (const r of $('dirtree').querySelectorAll('.drow')) r.classList.toggle('sel', r.dataset.path === path);
+}
+
+function dirNode(path, label) {
+  const li = document.createElement('li');
+  const row = document.createElement('div');
+  row.className = 'drow';
+  row.dataset.path = path;
+  row.innerHTML = '<span class="dtw">▸</span><span class="dname"></span>';
+  row.querySelector('.dname').textContent = label;
+  row.title = path;
+  const depth = path === dirInfo.root ? 0 : path.slice(dirInfo.root.length).split('/').length - 1;
+  row.style.paddingLeft = `${6 + depth * 16}px`;
+  li.appendChild(row);
+  const tw = row.querySelector('.dtw');
+  const toggle = async () => {
+    const sub = li.querySelector(':scope > ul');
+    if (sub) {
+      sub.remove();
+      tw.textContent = '▸';
+      return null;
+    }
+    tw.textContent = '▾';
+    const ul = document.createElement('ul');
+    li.appendChild(ul);
+    let r;
+    try {
+      r = await api('GET', `/files/list?path=${enc(path)}`);
+    } catch (e) {
+      ul.innerHTML = `<li class="dmsg" style="padding-left:${22 + depth * 16}px"></li>`;
+      ul.firstChild.textContent = e.message;
+      return ul;
+    }
+    const dirs = r.entries.filter((e) => e.dir && !e.name.startsWith('.'));
+    if (!dirs.length) {
+      ul.innerHTML = `<li class="dmsg" style="padding-left:${22 + depth * 16}px">하위 폴더 없음</li>`;
+      tw.textContent = '·';
+    }
+    for (const e of dirs) ul.appendChild(dirNode(`${r.path}/${e.name}`, e.name));
+    return ul;
+  };
+  li.expand = async () => {
+    if (!li.querySelector(':scope > ul')) await toggle();
+  };
+  tw.onclick = (e) => {
+    e.stopPropagation();
+    toggle();
+  };
+  row.onclick = () => pickDir(path);
+  row.ondblclick = () => toggle();
+  return li;
+}
+
+async function openDirTree() {
+  const tree = $('dirtree');
+  if (!tree.hidden) {
+    tree.hidden = true;
+    return;
+  }
+  if (!dirInfo.root) {
+    try { dirInfo = await api('GET', '/dirs'); } catch (e) { return toast(e.message); }
+  }
+  tree.hidden = false;
+  tree.innerHTML = '';
+  const rootLi = dirNode(dirInfo.root, `~ (${dirInfo.root})`);
+  tree.appendChild(rootLi);
+  await rootLi.expand();
+  const want = $('newdir').value.replace(/\/+$/, '');
+  if (want.startsWith(`${dirInfo.root}/`)) {
+    let acc = dirInfo.root;
+    for (const part of want.slice(dirInfo.root.length + 1).split('/')) {
+      acc += `/${part}`;
+      const row = [...tree.querySelectorAll('.drow')].find((r) => r.dataset.path === acc);
+      if (!row) break;
+      if (acc !== want) await row.parentElement.expand();
+    }
+  }
+  pickDir(want || dirInfo.root);
+  tree.querySelector('.drow.sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+$('dirbrowse').onclick = openDirTree;
 
 const autoName = (dir) => dir.replace(/\/+$/, '').split('/').pop().replace(/[.:]/g, '_');
 $('newdir').addEventListener('input', () => { $('newname').placeholder = autoName($('newdir').value) || '폴더 이름으로 자동'; });

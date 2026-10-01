@@ -148,6 +148,18 @@ dialog form { display:flex; flex-direction:column; gap:12px; margin:0; }
 dialog label { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--dim); }
 dialog input, dialog select, dialog textarea { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; }
 dialog textarea { font:13px ui-monospace, monospace; resize:vertical; }
+.dirpick { display:flex; gap:6px; }
+.dirpick input { flex:1; min-width:0; }
+.dirpick button { flex:none; }
+#dirtree { list-style:none; margin:-4px 0 0; padding:4px; max-height:min(40dvh, 320px); overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; font-size:13px; }
+#dirtree[hidden] { display:none; }
+#dirtree ul { list-style:none; margin:0; padding:0; }
+#dirtree .drow { display:flex; align-items:center; gap:4px; padding:4px 6px; border-radius:4px; cursor:pointer; white-space:nowrap; }
+#dirtree .drow:hover { background:#2f3237; }
+#dirtree .drow.sel { background:#2c3a4f; color:var(--accent); }
+#dirtree .dtw { flex:none; width:16px; text-align:center; color:var(--dim); }
+#dirtree .dname { overflow:hidden; text-overflow:ellipsis; }
+#dirtree .dmsg { padding:4px 6px; color:var(--dim); }
 dialog .actions { display:flex; justify-content:flex-end; gap:8px; }
 dialog .actions button { padding:7px 14px; }
 dialog .actions.vertical { flex-direction:column; align-items:stretch; }
