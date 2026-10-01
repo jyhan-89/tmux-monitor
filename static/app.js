@@ -604,6 +604,17 @@ function createConn(name) {
     return true;
   });
   el.addEventListener('mousedown', () => { if (activeName !== conn.name) activate(conn.name, false); });
+  host.addEventListener('mouseup', (e) => {
+    if (e.button !== 0) return;
+    setTimeout(() => {
+      const sel = term.getSelection();
+      if (!sel || !sel.trim()) return;
+      copyText(sel).then((ok) => {
+        toast(ok ? `복사했습니다 (${sel.length}자)` : '복사 실패', 1200);
+        if (ok) term.focus();
+      });
+    }, 0);
+  });
   new ResizeObserver(() => fitConn(conn)).observe(el);
 
   connectWs(conn);
