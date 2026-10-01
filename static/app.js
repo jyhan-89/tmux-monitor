@@ -164,6 +164,18 @@ function groupHeader(g, members) {
     li.querySelector('.grename').onclick = (e) => { e.stopPropagation(); renameGroup(g); };
     li.querySelector('.gdel').onclick = (e) => { e.stopPropagation(); deleteGroup(g, members); };
   }
+  li.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items = [
+      { label: g === null ? '새 세션' : '이 그룹에 새 세션', run: () => openNewSession({ group: g }) },
+      { label: folded ? '펼치기' : '접기', run: () => li.click() },
+    ];
+    if (g !== null) {
+      items.push('-', { label: '그룹 이름 바꾸기', run: () => renameGroup(g) }, { label: '그룹 삭제', danger: true, run: () => deleteGroup(g, members) });
+    }
+    openCtx(e.clientX, e.clientY, items);
+  });
   return li;
 }
 
@@ -213,8 +225,64 @@ function sessionItem(s, inGroup) {
   li.querySelector('.rename').onclick = (e) => { e.stopPropagation(); renameSession(s.name); };
   li.querySelector('.kill').onclick = (e) => { e.stopPropagation(); killSession(s.name); };
   li.querySelector('.move').onclick = (e) => { e.stopPropagation(); openMove(s); };
+  li.addEventListener('contextmenu', (e) => {
+    if (drag) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openCtx(e.clientX, e.clientY, sessionMenu(s));
+  });
   return li;
 }
+
+function openFilesAt(path) {
+  if (!confirmLeave()) return;
+  $('files').hidden = false;
+  setDrawer(false);
+  fb.session = activeName;
+  listDir(path || null);
+}
+
+function sessionMenu(s) {
+  const items = [{ label: '열기', run: () => openSession(s.name) }];
+  if (!narrow.matches) {
+    items.push({
+      label: '오른쪽에 분할해서 열기',
+      run: () => {
+        setDrawer(false);
+        const g = groupOf(activeName);
+        if (!g || s.name === activeName) return openSession(s.name);
+        placeSession(s.name, g.gid, 'right');
+      },
+    });
+  }
+  items.push(
+    '-',
+    { label: '이 폴더에서 새 세션', run: () => openNewSession({ dir: s.path, group: s.group || null }) },
+    { label: '파일 탐색에서 열기', disabled: !s.path, run: () => openFilesAt(s.path) },
+    { label: '경로 복사', disabled: !s.path, run: () => copyText(s.path).then((ok) => toast(ok ? '경로를 복사했습니다' : '복사 실패')) },
+    '-',
+    { label: '이름 바꾸기', run: () => renameSession(s.name) },
+    { label: '그룹으로 이동', run: () => openMove(s) },
+  );
+  if (conns.has(s.name)) items.push({ label: '탭 닫기 (세션 유지)', run: () => closeSession(s.name) });
+  items.push('-', { label: '세션 종료', danger: true, run: () => killSession(s.name) });
+  return items;
+}
+
+function listMenu() {
+  return [
+    { label: '새 세션', run: () => openNewSession() },
+    { label: '새 그룹', run: () => $('newgroup').click() },
+    '-',
+    { label: '새로고침', run: refresh },
+  ];
+}
+
+$('sessions').addEventListener('contextmenu', (e) => {
+  if (e.target.closest('li')) return;
+  e.preventDefault();
+  openCtx(e.clientX, e.clientY, listMenu());
+});
 
 $('sort').value = sortMode;
 $('sort').onchange = () => {
@@ -1296,7 +1364,12 @@ for (const b of document.querySelectorAll('dialog [data-close]')) {
   b.onclick = () => b.closest('dialog').close('cancel');
 }
 
-$('new').onclick = async () => {
+let newOpts = {};
+
+$('new').onclick = () => openNewSession();
+
+async function openNewSession(opts = {}) {
+  newOpts = opts;
   $('newform').reset();
   $('newerr').textContent = '';
   const last = LS.get('newcmd', 'claude');
@@ -1308,7 +1381,7 @@ $('new').onclick = async () => {
     $('newcmd').value = last;
   }
   $('newcmd').hidden = sel.value !== 'custom';
-  $('newdir').value = dirInfo.home;
+  $('newdir').value = opts.dir || dirInfo.home;
   $('newname').placeholder = autoName($('newdir').value) || '폴더 이름으로 자동';
   $('dirtree').hidden = true;
   $('dirtree').innerHTML = '';
@@ -1328,7 +1401,7 @@ $('new').onclick = async () => {
       $('dirlist').appendChild(o);
     }
   } catch {}
-};
+}
 
 let dirInfo = { home: '', root: '', dirs: [] };
 
@@ -1440,6 +1513,7 @@ $('newform').addEventListener('submit', async (e) => {
   }
   LS.set('newcmd', command);
   $('newdlg').close();
+  if (newOpts.group) await api('PUT', `/sessions/${enc(name)}/group`, { group: newOpts.group }).catch(() => {});
   await refresh();
   openSession(name);
 });
