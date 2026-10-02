@@ -56,7 +56,7 @@ roles:
     can_edit: ["coord/standards-check/**"]
   integrator:
     prompt: prompts/integrator.md
-    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Bash(git merge:*)", "Bash(git push origin main)", "Bash(git checkout:*)", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Bash(git fetch:*)", "Bash(git merge:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push origin HEAD:main)", "Bash(directive:*)"]
     can_edit: ["src/**", "test/**"]
   sil:
     prompt: prompts/sil.md

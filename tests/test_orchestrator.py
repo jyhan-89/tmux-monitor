@@ -142,7 +142,7 @@ def env(tmp_path, monkeypatch):
     gates: dict[str, list[bool]] = {}
     calls: list[tuple[str, str]] = []
 
-    def fake_gate(gate, div, wt, feature, node):
+    def fake_gate(gate, div, wt, feature, node, env=None):
         calls.append((node, wt))
         results = gates.get(node, [])
         ok = results.pop(0) if results else True

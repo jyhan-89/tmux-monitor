@@ -151,7 +151,16 @@ def tracked_state(wt: str) -> str:
     return r.stdout + head.stdout
 
 
-def run_gate(gate: str, div: models.Division, worktree: str, feature: str, node: str) -> tuple[bool, str]:
+def gate_env(company: models.Company | None, role: str) -> dict[str, str]:
+    if not company or role not in company.org.roles:
+        return {}
+    r = company.org.roles[role]
+    others = [d.pattern for d in company.documents.documents if d.owner != role and d.pattern not in r.can_edit]
+    return {"GATE_ROLE": role, "GATE_CAN_EDIT": " ".join(r.can_edit), "GATE_DENY": " ".join(r.cannot_edit + others)}
+
+
+def run_gate(gate: str, div: models.Division, worktree: str, feature: str, node: str,
+             env: dict[str, str] | None = None) -> tuple[bool, str]:
     path = gate_path(gate, div)
     if not path.exists():
         return False, f"게이트 스크립트가 없습니다: {path}"
@@ -160,7 +169,7 @@ def run_gate(gate: str, div: models.Division, worktree: str, feature: str, node:
     before = tracked_state(worktree)
     try:
         r = subprocess.run([str(path), worktree, feature, str(out_dir)], cwd=worktree, capture_output=True, text=True,
-                           timeout=GATE_TIMEOUT)
+                           timeout=GATE_TIMEOUT, env={**os.environ, **(env or {})})
         ok, text = r.returncode == 0, (r.stdout + r.stderr)
     except subprocess.TimeoutExpired:
         ok, text = False, "게이트 시간 초과"
@@ -294,12 +303,12 @@ class Orchestrator:
             self.fail(template, inst, node, reasons)
             return 0
         if all(d["status"] == "done" for d in ds.values()):
-            self.judge(template, div, sessions, inst, node, ds)
+            self.judge(template, div, sessions, inst, node, ds, company)
             return 0
         self.nudge(sessions, inst, ds, now)
         return 0
 
-    def judge(self, template, div, sessions, inst, node, ds) -> None:
+    def judge(self, template, div, sessions, inst, node, ds, company=None) -> None:
         missing = [d["to"] for d in ds.values() if not d.get("refs")]
         if missing:
             self.fail(template, inst, node, f"산출물 참조(--ref) 없이 done: {', '.join(missing)}")
@@ -310,7 +319,7 @@ class Orchestrator:
             for g in (node.pre_gate, node.gate):
                 if not g:
                     continue
-                passed, tail = run_gate(g, div, wt, inst["feature"], node.id)
+                passed, tail = run_gate(g, div, wt, inst["feature"], node.id, gate_env(company, node.role))
                 history.record({"type": "gate_result", "session": d["to"], "division": inst["division"],
                                 "feature": inst["feature"], "node": node.id, "gate": g,
                                 "result": "pass" if passed else "fail", "tail": tail})

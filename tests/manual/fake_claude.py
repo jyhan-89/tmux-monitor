@@ -24,22 +24,42 @@ def header(body: str) -> dict:
     return dict(line.split(": ", 1) for line in body.splitlines()[:3] if ": " in line)
 
 
-def work(h: dict) -> str:
-    feature, layer = h.get("feature", "x"), h.get("layer", "-")
-    if ROLE == "impl":
-        f = Path("src") / f"{layer}.txt"
-    elif ROLE == "reviewer":
-        f = Path("coord") / "review" / f"{feature}.md"
-    else:
-        f = Path("coord") / "issue" / f"{feature}-{ROLE}.md"
+def commit(f: Path, text: str, msg: str) -> str:
     f.parent.mkdir(parents=True, exist_ok=True)
-    verdict = "APPROVED"
-    if ROLE == "reviewer" and os.environ.get("FAKE_REJECT_FIRST") and not f.exists():
-        verdict = "CHANGES_REQUESTED"
-    f.write_text(f"{verdict}\n가짜 리뷰 {time.time_ns()}\n" if ROLE == "reviewer" else f"{ROLE} {feature} {layer} {time.time_ns()}\n")
+    f.write_text(text)
     sh("git", "add", str(f))
-    sh("git", "commit", "-q", "-m", f"{ROLE}: {feature} {layer}")
+    sh("git", "commit", "-q", "-m", msg)
     return f"{sh('git', 'branch', '--show-current')}@{sh('git', 'rev-parse', '--short', 'HEAD')}"
+
+
+def work(h: dict) -> str:
+    feature, layer, node = h.get("feature", "x"), h.get("layer", "-"), h.get("node", "")
+    stamp = time.time_ns()
+    if ROLE == "impl":
+        return commit(Path("src") / f"{layer}.txt", f"{feature} {layer} {stamp}\n", f"impl: {feature} {layer}")
+    if ROLE == "reviewer":
+        f = Path("coord") / "review" / f"{feature}.md"
+        verdict = "CHANGES_REQUESTED" if os.environ.get("FAKE_REJECT_FIRST") and not f.exists() else "APPROVED"
+        return commit(f, f"{verdict}\n가짜 리뷰 {stamp}\n", f"review: {feature}")
+    if ROLE == "feature_design":
+        return commit(Path("coord") / "design" / f"{feature}.md", f"# {feature}\n{stamp}\n", f"design: {feature}")
+    if ROLE == "standards_checker":
+        return commit(Path("coord") / "standards-check" / f"impl-{feature}.md", f"PASS\n{stamp}\n", f"std: {feature}")
+    if ROLE == "sil":
+        f = Path("reports") / node / f"{feature}.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"결과: PASS\n{stamp}\n")
+        return str(f)
+    if ROLE == "integrator":
+        sh("git", "fetch", "-q", "origin")
+        sh("git", "merge", "-q", "--no-edit", "origin/main")
+        me = sh("git", "branch", "--show-current")
+        for b in sh("git", "for-each-ref", "--format=%(refname:short)", f"refs/heads/feat/{feature}/").split():
+            if b != me:
+                sh("git", "merge", "-q", "--no-ff", "--no-edit", b)
+        sh("git", "push", "-q", "origin", "HEAD:main")
+        return f"main@{sh('git', 'rev-parse', '--short', 'HEAD')}"
+    return commit(Path("coord") / "issue" / f"{feature}-{ROLE}.md", f"{ROLE} {stamp}\n", f"{ROLE}: {feature}")
 
 
 def check_inbox() -> None:
