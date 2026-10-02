@@ -60,6 +60,17 @@ aside header button { padding:4px 8px; }
 main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #bar { padding:6px 8px; border-bottom:1px solid var(--line); display:flex; gap:6px; align-items:center; }
 #bar > button { flex:none; padding:4px 9px; }
+#desks { flex:none; display:flex; gap:3px; align-items:center; }
+.desk { position:relative; display:flex; align-items:center; gap:5px; padding:3px 9px; font-size:12px; color:var(--dim); }
+.desk.on { border-color:var(--accent); color:var(--fg); background:#2c3a4f; }
+.desk .dnum { font-weight:700; }
+.desk .dlabel { max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.desk .dlabel:empty { display:none; }
+.desk .ddot { display:none; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.desk .ddot.st-working { display:inline-block; color:var(--busy); }
+.desk .ddot.st-waiting { display:inline-block; color:var(--warn); animation:pulse 1.4s infinite; }
+.desk.drop { border-color:var(--accent); background:rgba(79,156,249,.25); }
+.desk.add { padding:3px 7px; }
 #tabs { flex:1; min-width:0; display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; }
 .tab { flex:none; display:flex; align-items:center; gap:6px; padding:4px 6px 4px 10px; border:1px solid var(--line); border-radius:6px; background:#2a2c31; cursor:pointer; max-width:200px; }
 .tab.active { border-color:var(--accent); background:#2c3a4f; }

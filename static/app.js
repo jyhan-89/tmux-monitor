@@ -23,6 +23,8 @@ const conns = new Map();
 let activeName = null;
 const SESSION_MIME = 'application/x-tmux-session';
 let tree = null;
+let desks = [{ name: '', tree: null, active: null }];
+let deskIdx = 0;
 let layoutKey = '';
 let fontSize = +LS.get('fontSize', narrow.matches ? 12 : 14);
 let imeOn = true;
@@ -334,7 +336,7 @@ async function deleteGroup(g, members) {
 async function removeGroup(g, kill) {
   try {
     const r = await api('DELETE', `/groups/${enc(g)}?kill=${kill}`);
-    for (const name of r.killed || []) closeSession(name);
+    for (const name of r.killed || []) closeSession(name, true);
     if (r.failed?.length) toast(`종료 실패: ${r.failed.join(', ')}`, 4000);
     else if (kill) toast(`세션 ${r.killed.length}개를 종료했습니다`);
   } catch (e) {
@@ -527,10 +529,14 @@ async function renameSession(name) {
     conn.name = newName;
     conn.el.dataset.name = newName;
     conns.set(newName, conn);
-    const g = groupOf(name);
-    if (g) {
-      g.tabs[g.tabs.indexOf(name)] = newName;
-      if (g.active === name) g.active = newName;
+    desks[deskIdx].tree = tree;
+    for (const d of desks) {
+      for (const g of leaves(d.tree)) {
+        const i = g.tabs.indexOf(name);
+        if (i >= 0) g.tabs[i] = newName;
+        if (g.active === name) g.active = newName;
+      }
+      if (d.active === name) d.active = newName;
     }
     if (activeName === name) activeName = newName;
     saveTabs();
@@ -540,15 +546,17 @@ async function renameSession(name) {
 
 async function killSession(name) {
   if (!confirm(`'${name}' 세션을 종료할까요? 실행 중인 작업이 모두 종료됩니다.`)) return;
-  closeSession(name);
+  closeSession(name, true);
   try { await api('DELETE', `/sessions/${enc(name)}`); } catch (e) { toast(e.message); }
   refresh();
 }
 
 function saveTabs() {
+  desks[deskIdx].tree = tree;
+  desks[deskIdx].active = activeName;
   LS.set('openTabs', [...conns.keys()]);
-  LS.set('activeTab', activeName);
-  LS.set('layout', tree);
+  LS.set('desks', desks.map((d) => ({ name: d.name, tree: d.tree, active: d.active })));
+  LS.set('deskIdx', deskIdx);
 }
 
 function openSession(name) {
@@ -597,6 +605,7 @@ function createConn(name) {
   term.onData((data) => conn.send({ type: 'input', data: applyCtrl(data) }));
   term.onResize(({ cols, rows }) => conn.raw({ type: 'resize', cols, rows }));
   term.attachCustomKeyEventHandler((e) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) return false;
     if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
       const sel = term.getSelection();
       if (sel) copyText(sel).then((ok) => toast(ok ? '복사했습니다' : '복사 실패'));
@@ -717,7 +726,7 @@ function checkConnections() {
   refresh();
 }
 
-function closeSession(name) {
+function disposeConn(name) {
   const conn = conns.get(name);
   if (!conn) return;
   conn.closed = true;
@@ -726,14 +735,163 @@ function closeSession(name) {
   conn.term.dispose();
   conn.el.remove();
   conns.delete(name);
+}
+
+function removeFromTree(t, name) {
+  for (const g of leaves(t)) {
+    const i = g.tabs.indexOf(name);
+    if (i < 0) continue;
+    g.tabs.splice(i, 1);
+    if (g.active === name) g.active = g.tabs[Math.min(i, g.tabs.length - 1)] || null;
+  }
+  return prune(t);
+}
+
+function inOtherDesks(name) {
+  return desks.some((d, i) => i !== deskIdx && leaves(d.tree).some((g) => g.tabs.includes(name)));
+}
+
+function closeSession(name, everywhere = false) {
+  if (!conns.has(name)) return;
   const g = groupOf(name);
   removeFromGroups(name);
+  if (everywhere) {
+    desks.forEach((d, i) => {
+      if (i === deskIdx) return;
+      d.tree = removeFromTree(d.tree, name);
+      if (d.active === name) d.active = leaves(d.tree)[0]?.active || null;
+    });
+  }
+  if (!inOtherDesks(name)) disposeConn(name);
   if (activeName === name) {
-    activeName = (g && groupById(g.gid)?.active) || leaves()[0]?.active || [...conns.keys()].pop() || null;
+    activeName = (g && groupById(g.gid)?.active) || leaves()[0]?.active || null;
   }
   layout();
   saveTabs();
   renderList();
+}
+
+function switchDesk(i) {
+  if (i === deskIdx || !desks[i]) return;
+  desks[deskIdx].tree = tree;
+  desks[deskIdx].active = activeName;
+  deskIdx = i;
+  tree = desks[i].tree;
+  activeName = desks[i].active;
+  layout();
+  saveTabs();
+  renderList();
+  focusInput();
+}
+
+function addDesk() {
+  desks.push({ name: '', tree: null, active: null });
+  switchDesk(desks.length - 1);
+}
+
+function deskNames(d) {
+  return leaves(d.tree).flatMap((g) => g.tabs);
+}
+
+function renameDesk(i) {
+  const name = prompt('데스크탑 이름', desks[i].name || '');
+  if (name === null) return;
+  desks[i].name = name.trim().slice(0, 20);
+  saveTabs();
+  renderDesks();
+}
+
+function deleteDesk(i) {
+  if (desks.length < 2) return toast('데스크탑이 하나뿐이라 삭제할 수 없습니다');
+  desks[deskIdx].tree = tree;
+  desks[deskIdx].active = activeName;
+  const names = i === deskIdx ? leaves().flatMap((g) => g.tabs) : deskNames(desks[i]);
+  if (names.length && !confirm(`데스크탑 ${i + 1}의 탭 ${names.length}개를 닫습니다 (세션은 유지). 삭제할까요?`)) return;
+  if (i === deskIdx) {
+    desks[deskIdx].tree = tree;
+    deskIdx = i === 0 ? 1 : i - 1;
+  }
+  desks.splice(i, 1);
+  if (deskIdx > i) deskIdx--;
+  tree = desks[deskIdx].tree;
+  activeName = desks[deskIdx].active;
+  for (const n of names) if (!desks.some((d, j) => (j === deskIdx ? leaves() : leaves(d.tree)).some((g) => g.tabs.includes(n)))) disposeConn(n);
+  layout();
+  saveTabs();
+  renderList();
+}
+
+function moveTabToDesk(name, i) {
+  if (i === deskIdx || !desks[i] || !conns.has(name)) return;
+  const d = desks[i];
+  if (!deskNames(d).includes(name)) {
+    const g = leaves(d.tree).find((x) => x.tabs.includes(d.active)) || leaves(d.tree)[0];
+    if (g) {
+      g.tabs.push(name);
+      g.active = name;
+    } else {
+      d.tree = group([name]);
+    }
+    d.active = name;
+  }
+  const g = groupOf(name);
+  removeFromGroups(name);
+  if (activeName === name) activeName = (g && groupById(g.gid)?.active) || leaves()[0]?.active || null;
+  layout();
+  saveTabs();
+  toast(`${name} → 데스크탑 ${i + 1}`);
+}
+
+function deskState(d, i) {
+  const names = i === deskIdx ? leaves().flatMap((g) => g.tabs) : deskNames(d);
+  const states = names.map((n) => sessions.find((s) => s.name === n)?.state);
+  return states.includes('waiting') ? 'waiting' : states.includes('working') ? 'working' : '';
+}
+
+function renderDesks() {
+  const box = $('desks');
+  box.innerHTML = '';
+  desks.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = `desk${i === deskIdx ? ' on' : ''}`;
+    const st = deskState(d, i);
+    b.innerHTML = '<span class="dnum"></span><span class="dlabel"></span><span class="ddot"></span>';
+    b.querySelector('.dnum').textContent = i + 1;
+    b.querySelector('.dlabel').textContent = d.name || '';
+    if (st) b.querySelector('.ddot').className = `ddot st-${st}`;
+    b.title = `데스크탑 ${i + 1}${d.name ? ` · ${d.name}` : ''}${i < 9 ? ` (Alt+${i + 1})` : ''} · 우클릭: 이름 바꾸기/삭제`;
+    b.onclick = () => switchDesk(i);
+    b.ondblclick = () => renameDesk(i);
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openCtx(e.clientX, e.clientY, [
+        { label: '이 데스크탑으로 이동', run: () => switchDesk(i) },
+        { label: '이름 바꾸기', run: () => renameDesk(i) },
+        '-',
+        { label: '데스크탑 삭제', danger: true, disabled: desks.length < 2, run: () => deleteDesk(i) },
+      ]);
+    });
+    b.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types.includes(SESSION_MIME) || i === deskIdx) return;
+      e.preventDefault();
+      b.classList.add('drop');
+    });
+    b.addEventListener('dragleave', () => b.classList.remove('drop'));
+    b.addEventListener('drop', (e) => {
+      b.classList.remove('drop');
+      if (!e.dataTransfer?.types.includes(SESSION_MIME)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      moveTabToDesk(e.dataTransfer.getData(SESSION_MIME), i);
+    });
+    box.appendChild(b);
+  });
+  const add = document.createElement('button');
+  add.className = 'desk add';
+  add.textContent = '＋';
+  add.title = '새 데스크탑';
+  add.onclick = addDesk;
+  box.appendChild(add);
 }
 
 function activate(name, focus = true) {
@@ -1003,7 +1161,7 @@ function layout() {
   tree = prune(tree);
   if (activeName && !conns.has(activeName)) activeName = null;
   for (const name of conns.keys()) {
-    if (!groupOf(name)) addToGroup(name, groupOf(activeName) || leaves()[0], null, false);
+    if (!groupOf(name) && !inOtherDesks(name)) addToGroup(name, groupOf(activeName) || leaves()[0], null, false);
   }
   if (!activeName) activeName = leaves()[0]?.active || null;
   const key = narrow.matches ? `n:${activeName}` : JSON.stringify(tree, (k, v) => (k === 'sizes' ? undefined : v));
@@ -1029,7 +1187,10 @@ function layout() {
       }
     });
   }
-  $('empty').hidden = conns.size > 0;
+  $('empty').hidden = leaves().length > 0;
+  $('empty').textContent = conns.size
+    ? '이 데스크탑은 비어 있습니다 · 세션 목록에서 세션을 열거나 탭을 끌어다 놓으세요'
+    : '세션 목록에서 세션을 선택하면 접속합니다';
   const focusGid = groupOf(activeName)?.gid;
   for (const w of term.querySelectorAll('.leaf')) w.classList.toggle('focus', !!focusGid && w.dataset.gid === focusGid);
   for (const name of visibleNames()) {
@@ -1051,8 +1212,9 @@ function renderTabs() {
     t.classList.toggle('offline', !(c?.ws && c.ws.readyState === WebSocket.OPEN));
     t.title = s?.state ? `${t.dataset.name} · ${STATE_LABEL[s.state]}` : t.dataset.name;
   }
+  renderDesks();
   if (!narrow.matches) return;
-  for (const c of conns.values()) {
+  for (const c of leaves().flatMap((g) => g.tabs).map((n) => conns.get(n)).filter(Boolean)) {
     const s = sessions.find((x) => x.name === c.name);
     const tab = document.createElement('div');
     tab.className = 'tab';
@@ -1139,7 +1301,7 @@ async function killWindow(s, w) {
   } catch (e) {
     return toast(e.message, 5000);
   }
-  if (last) closeSession(s.name);
+  if (last) closeSession(s.name, true);
   refresh();
 }
 
@@ -2135,6 +2297,14 @@ function downloadFile(path) {
 document.addEventListener('mousedown', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, true);
 document.addEventListener('touchstart', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, { capture: true, passive: true });
 document.addEventListener('keydown', (e) => {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
+    const i = +e.code.slice(5) - 1;
+    if (desks[i]) {
+      e.preventDefault();
+      switchDesk(i);
+    }
+    return;
+  }
   if (e.key === 'Escape' && !$('ctxmenu').hidden) return closeCtx();
   if ($('files').hidden || fb.file || !fb.path) return;
   if (e.target.closest('input, textarea, select, [contenteditable], .xterm, dialog')) return;
@@ -2681,7 +2851,7 @@ if (window.visualViewport) {
 
 $('refresh').onclick = refresh;
 $('logout').onclick = async () => {
-  for (const name of [...conns.keys()]) closeSession(name);
+  for (const name of [...conns.keys()]) closeSession(name, true);
   await fetch(`${base}/api/logout`, { method: 'POST' });
   toLogin();
 };
@@ -2719,12 +2889,18 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
 
   await refresh();
   const exists = (n) => sessions.some((s) => s.name === n);
-  for (const name of LS.get('openTabs', [])) {
-    if (exists(name) && !conns.has(name)) conns.set(name, createConn(name));
+  const saved = LS.get('desks', null) || [{ name: '', tree: LS.get('layout', null), active: LS.get('activeTab', null) }];
+  const rawNames = (t) => (!t || typeof t !== 'object' ? []
+    : t.t === 'leaf' ? (Array.isArray(t.tabs) ? t.tabs : [t.name]) : (t.kids || []).flatMap(rawNames));
+  const want = new Set([...LS.get('openTabs', []), ...saved.flatMap((d) => rawNames(d.tree))]);
+  for (const name of want) {
+    if (typeof name === 'string' && exists(name) && !conns.has(name)) conns.set(name, createConn(name));
   }
-  tree = sanitizeTree(LS.get('layout', null));
-  const last = LS.get('activeTab', null);
-  activeName = last && conns.has(last) ? last : null;
+  desks = saved.map((d) => ({ name: String(d.name || ''), tree: sanitizeTree(d.tree), active: d.active }));
+  if (!desks.length) desks = [{ name: '', tree: null, active: null }];
+  deskIdx = Math.min(Math.max(0, +LS.get('deskIdx', 0) || 0), desks.length - 1);
+  tree = desks[deskIdx].tree;
+  activeName = conns.has(desks[deskIdx].active) ? desks[deskIdx].active : null;
   layout();
   const target = new URLSearchParams(location.search).get('s');
   if (target) {

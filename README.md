@@ -18,6 +18,7 @@ The UI is in Korean.
 - **Session list**: last 3 lines of output and a status per session (shell, running, Claude working / needs input / idle), sorting, groups
 - **Terminal**: attaches to tmux sessions with xterm.js; reconnects automatically when the connection drops
 - **Split view**: drag a tab to split up/down/left/right, a tab bar per area, resize with the dividers
+- **Virtual desktops**: each desktop keeps its own split layout and tabs; switch with Alt+1–9. A session can be on several desktops
 - **Session management**: create (working folder, start command), rename, kill; switch and close tmux windows/panes
 - **Input**: input box for Korean (IME) text, buttons for frequently used commands, mobile keys (Esc, Ctrl, arrows, …)
 - **Files**: browse under the home folder, view Markdown and code, upload files. Editing, copy, move and delete are optional (off by default)
@@ -85,6 +86,7 @@ open `http://localhost:8765/dev/setup` **in a browser on the server PC**.
 |---|---|
 | Open a session | Click it in the list. It opens as a tab in the selected area |
 | Split the view | Drag a tab or a session from the list to an edge of the terminal area |
+| Desktops | Number buttons at the top to switch, ＋ to add, right-click to rename/delete, drop a tab on a number to move it |
 | Session / group menu | Right-click in the list (phone: 📁 ✎ ✕ buttons) |
 | Type Korean | Type in the input box at the bottom, then Enter |
 | See earlier output | Mouse wheel / swipe up or down on a phone |
