@@ -23,6 +23,7 @@ PC에서 실행 중인 tmux 세션을 브라우저에서 보고 접속하는 웹
 - **복사**: 터미널과 파일 보기에서 드래그로 선택하면 접속한 기기의 클립보드로 복사
 - **알림**: Claude 작업이 끝나거나 확인이 필요할 때 웹 푸시 알림 (HTTPS 필요)
 - **세션 저장/복원**: tmux-persist 애드온으로 주기적으로 저장하고 재부팅 후 복원
+- **오케스트레이터 (선택)**: 조직·프로세스 정의에 따라 여러 Claude 세션을 자동 운영, 결재함·조직도·비상 정지
 
 Claude 상태는 화면에 보이는 문구(`esc to interrupt`, `Do you want to…` 등)로 판단합니다.
 Claude Code의 화면 구성이 바뀌면 상태 표시가 맞지 않을 수 있습니다.
@@ -55,6 +56,7 @@ install/ubuntu.sh          # macOS: install/macos.sh
 기타 옵션
 
 - `--with-persist`: tmux-persist 애드온 함께 설치 (아래 참고)
+- `--with-orchestrator`: 오케스트레이터 함께 설치 (아래 참고)
 - `--no-service`: 자동 시작 등록 안 함 (`./run.sh`로 직접 실행)
 - `-y`: 질문에 모두 예 (계정 만들기 제외)
 - 포트 변경: `PORT=9000 install/ubuntu.sh`
@@ -113,6 +115,58 @@ echo 'set -s set-clipboard on' >> ~/.tmux.conf
 - 웹의 💾에서 지금 저장하거나 원하는 스냅샷으로 복원할 수 있습니다. 이미 있는 세션은 건너뜁니다
 - 명령줄: `tmux-persist save | restore [스냅샷] | list`
 
+### 오케스트레이터 (선택, 실험 단계)
+
+여러 Claude Code 세션을 조직(본부·부서·역할)과 프로세스(단계·게이트·반려 루프) 정의에 따라 자동으로 운영합니다.
+사람은 결재함에서 승인·반려만 하고, 나머지는 세션들이 지시서를 주고받으며 진행합니다.
+
+```
+결재함(📝) / 조직도(🏢) ── tmux-web 서버 ── 오케스트레이터(별도 서비스)
+                              │                 │ 지시서 발송·깨우기·게이트 실행
+                         이력(JSONL)      역할 세션 (worktree + CLAUDE.md + 권한)
+```
+
+설치: `install/ubuntu.sh --with-orchestrator`. `~/.config/tmux-web/company/`에 역할 프롬프트와 예시 정의가 복사되고
+오케스트레이터 서비스(`tmux-web-orchestrator`)가 등록됩니다. 정의가 없으면 오케스트레이터는 대기만 합니다.
+
+**정의 파일** (`~/.config/tmux-web/company/`, 저장할 때마다 이 폴더의 git에 기록)
+
+| 파일 | 내용 |
+|---|---|
+| `org.yaml` | 본부·부서·역할, 역할별 모델·인원·권한(`allowed_tools`, `can_edit`), 본부의 git 저장소 |
+| `process.yaml` | 노드(담당 역할, 게이트, 통과·실패 시 다음 노드, 재시도, 결재 필요), 반려 루프 상한 |
+| `documents.yaml` | 문서 소유권, 지시서 종류별 보낼 수 있는 역할·받을 역할 |
+| `prompts/` | `common.md`(지시서 처리 절차)와 역할별·노드별 프롬프트 |
+
+예시: `company/examples/mw-minimal/`. 저장할 때 검증해서 규칙을 어기면 거부하고 규칙 이름과 위치를 알려 줍니다.
+
+**동작**
+
+- 역할 세션 이름은 `본부-부서-역할[-계층|번호]` (예: `mw-impl-impl-skeleton`). 세션 목록에서 `본부/부서` 하위 그룹으로 묶입니다
+- 런처가 세션마다 git worktree와 브랜치 `feat/<기능>/<계층>`, `CLAUDE.md`, 권한(`.claude/settings.json`, 목록 밖 도구는 묻지 않고 거부), 훅을 만듭니다. 처음 여는 worktree의 Claude Code 폴더 신뢰 확인은 런처가 자동으로 수락합니다
+- 세션 안의 판단과 절차는 `CLAUDE.md` 규칙이 맡고, 오케스트레이터는 지시서 배달·깨우기("inbox 확인")·게이트 실행·전이만 합니다
+- 세션은 `directive` 명령(list, show, ack, start, done, block, reject, send)으로 지시서를 처리합니다. `done --ref <브랜치@커밋>`이 있어야 완료로 봅니다
+- 게이트는 읽기 전용 스크립트입니다 (`gates/`). 벤더 빌드·테스트·SIL 연결은 `gates/adaptive/env.sh`의 `BUILD_CMD`, `TEST_CMD`, `STATIC_CMD`, `ARXML_VALIDATE`, `SIL_RUNNER`에 적습니다. 비워 두면 산출물 파일만 확인합니다
+- 상태는 지시서 → Claude Code 훅(30초 안) → 화면 감지 순으로 판단합니다
+
+**화면**
+
+| 하고 싶은 것 | 방법 |
+|---|---|
+| 기능 시작 | 📝 결재함 → 새 기능 시작 (본부, 기능 이름, 요청) |
+| 결재 | 📝 결재함에서 승인 / 반려 / 수정 요청 (반려·수정은 사유 필수). 결재가 생기면 푸시 알림 |
+| 조직·프로세스 보기와 편집 | 🏢 조직도: 역할 노드 색이 세션 상태, 노드를 누르면 편집 패널. 본부를 더블클릭하면 프로세스 |
+| 노드 강제 이동 | 📝 결재함 → 진행 중인 기능 → 노드 이동 |
+| 모두 멈추기 | 세션 목록 위 ⏹ 비상 정지 (모든 Claude 세션에 Esc, 자동 진행 정지). 배너의 해제로 재개 |
+| 세션 이력 | 세션 우클릭 → 최근 이력 |
+
+**주의**
+
+- 권한 설정은 실수 방지용입니다. Bash가 열린 역할은 우회할 수 있으므로 소유권은 게이트(`ownership_check.sh`)와 git 서버의 보호 브랜치로 지키세요
+- 통합(머지) 노드는 원격 저장소에 `git push origin HEAD:main`을 하므로 본부의 `repo`는 bare 저장소나 git 서버 주소로 두세요
+- NAS 백업: `TMUX_WEB_NAS_ROOT`를 정하고 설치하면 이력·정의·`coord/`와 git 미러를 매시간 동기화합니다
+- 수동 테스트 절차는 `tests/manual/README.md`
+
 ## 외부에서 접속하기
 
 이 서비스는 브라우저에서 셸을 쓰는 도구입니다. **공유기 포트포워딩 등으로 인터넷에 직접 열지 마세요.**
@@ -145,6 +199,9 @@ sudo tailscale serve --bg http://127.0.0.1:8765     # https://<기기이름>.<ta
 | `TMUX_WEB_AUTH` | `~/.config/tmux-web/auth.json` | 계정 파일 |
 | `TMUX_WEB_TLS` | `~/.config/tmux-web/tls` | 자체 인증서 폴더 |
 | `TMUX_PERSIST_DIR` | `~/.local/share/tmux-persist` | 스냅샷 폴더 |
+| `TMUX_WEB_DATA` | `~/.local/share/tmux-web` | 이력·지시서·결재·오케스트레이터 상태·worktree |
+| `TMUX_WEB_MAX_ACTIVE` | `4` | 동시에 작업할 수 있는 역할 세션 수 (오케스트레이터) |
+| `TMUX_WEB_NAS_ROOT` | (없음) | NAS 백업 경로 |
 
 `~/.config/tmux-web/`에는 계정, 로그인 세션, 명령 버튼·그룹 설정, 저장한 데스크탑 구성, 푸시 알림 키·구독, 인증서가 저장되며 저장소에는 포함되지 않습니다.
 지금 열려 있는 데스크탑 배치는 브라우저(접속 주소별)에 저장됩니다.
@@ -187,6 +244,17 @@ static/              웹 화면 (index.html, app.js, app.css, login/setup 화면
 install/             설치 스크립트 (Ubuntu, macOS)
 deploy/              systemd 유닛, nginx 설정, 인증서 생성 스크립트
 addons/tmux-persist/ 세션 저장/복원 애드온
+orchestrator.py      오케스트레이터 (노드 전이, 게이트, 결재 대기, 시간 상한, 복구)
+launcher.py          역할 세션 생성 (worktree, CLAUDE.md, 권한, 훅)
+models.py            조직·프로세스·문서 정의 로더와 검증
+directives.py        지시서 큐, bin/directive 세션용 명령
+approvals.py         결재 항목
+history.py           이력 (JSONL)
+*_api.py             정의·제어·지시서·결재·이벤트·이력 API
+company/             역할·노드 프롬프트, 예시 정의
+gates/               게이트 스크립트
+hooks/               Claude Code 훅 스크립트
+ops/                 NAS 동기화
 ```
 
 ## 라이선스

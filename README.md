@@ -25,6 +25,7 @@ The UI is in Korean.
 - **Copy**: selecting text by dragging in the terminal or file viewer copies it to the clipboard of the device you are using
 - **Notifications**: web push when a Claude task finishes or needs input (requires HTTPS)
 - **Save/restore sessions**: the tmux-persist add-on saves periodically and restores after a reboot
+- **Orchestrator (optional)**: runs several Claude sessions from an organization and process definition, with an approval inbox, org chart and emergency stop
 
 Claude status is detected from text on the screen (`esc to interrupt`, `Do you want to…`, etc.).
 If Claude Code changes its screen layout, the status may be wrong.
@@ -57,6 +58,7 @@ The install script sets up packages, a Python virtual environment, a login accou
 Other options
 
 - `--with-persist`: also install the tmux-persist add-on (see below)
+- `--with-orchestrator`: also install the orchestrator (see below)
 - `--no-service`: do not register auto-start (run `./run.sh` yourself)
 - `-y`: answer yes to all questions (except creating the account)
 - Change the port: `PORT=9000 install/ubuntu.sh`
@@ -117,6 +119,58 @@ It saves window/pane layout, working folders and screen contents, and reopens a 
 - From 💾 in the web UI you can save now or restore any snapshot. Existing sessions are skipped
 - Command line: `tmux-persist save | restore [snapshot] | list`
 
+### Orchestrator (optional, experimental)
+
+Runs several Claude Code sessions automatically according to an organization (divisions, departments, roles) and a process
+(stages, gates, rework loops). People only approve or reject in the inbox; the sessions exchange directives for the rest.
+
+```
+inbox (📝) / org chart (🏢) ── tmux-web server ── orchestrator (separate service)
+                                    │                │ sends directives, wakes sessions, runs gates
+                               history (JSONL)   role sessions (worktree + CLAUDE.md + permissions)
+```
+
+Install with `install/ubuntu.sh --with-orchestrator`. Role prompts and an example definition are copied to
+`~/.config/tmux-web/company/` and the `tmux-web-orchestrator` service is registered. Without definitions the orchestrator just waits.
+
+**Definition files** (`~/.config/tmux-web/company/`, every save is committed to git in that folder)
+
+| File | Contents |
+|---|---|
+| `org.yaml` | Divisions, departments and roles; model, head count and permissions (`allowed_tools`, `can_edit`) per role; each division's git repository |
+| `process.yaml` | Nodes (role, gate, next node on pass and on failure, retries, approval required) and rework loop limits |
+| `documents.yaml` | Document ownership; which roles may send and receive each directive type |
+| `prompts/` | `common.md` (how to handle directives) and per-role and per-node prompts |
+
+Example: `company/examples/mw-minimal/`. Definitions are validated on save; a rule violation is rejected with the rule name and location.
+
+**How it works**
+
+- Role sessions are named `division-dept-role[-layer|number]` (e.g. `mw-impl-impl-skeleton`) and grouped under `division/dept` in the session list
+- The launcher creates a git worktree and branch `feat/<feature>/<layer>`, `CLAUDE.md`, permissions (`.claude/settings.json`; tools outside the list are denied without asking) and hooks for each session. It accepts Claude Code's folder-trust prompt for the worktrees it creates
+- Judgment and procedure inside a session come from the `CLAUDE.md` rules; the orchestrator only delivers directives, wakes sessions ("inbox 확인"), runs gates and moves between nodes
+- Sessions handle directives with the `directive` command (list, show, ack, start, done, block, reject, send). A node counts as finished only with `done --ref <branch@commit>`
+- Gates are read-only scripts in `gates/`. Connect vendor build, test and SIL tools in `gates/adaptive/env.sh` (`BUILD_CMD`, `TEST_CMD`, `STATIC_CMD`, `ARXML_VALIDATE`, `SIL_RUNNER`); when empty, gates only check the output files
+- Session state comes from directives first, then Claude Code hooks (within 30 seconds), then screen detection
+
+**UI**
+
+| To do | How |
+|---|---|
+| Start a feature | 📝 inbox → new feature (division, feature name, request) |
+| Approve | 📝 inbox: approve / reject / request changes (reject and changes need a reason). New approvals send a push notification |
+| View and edit the organization and process | 🏢 org chart: role node color is the session state, click a node to edit it, double-click a division for its process |
+| Force a node | 📝 inbox → features in progress → move node |
+| Stop everything | ⏹ emergency stop above the session list (Esc to every Claude session, automation paused). Resume from the banner |
+| Session history | Right-click a session → recent history |
+
+**Notes**
+
+- Permissions are a guard against mistakes. A role with Bash can get around them, so enforce ownership with the gate (`ownership_check.sh`) and protected branches on the git server
+- The integrate node runs `git push origin HEAD:main`, so set each division's `repo` to a bare repository or a git server URL
+- NAS backup: install with `TMUX_WEB_NAS_ROOT` set to sync history, definitions, `coord/` and git mirrors every hour
+- Manual test procedures are in `tests/manual/README.md`
+
 ## Remote access
 
 This service gives a shell in the browser. **Do not expose it directly to the internet** (e.g. by port forwarding).
@@ -149,6 +203,9 @@ sudo tailscale serve --bg http://127.0.0.1:8765     # https://<machine>.<tailnet
 | `TMUX_WEB_AUTH` | `~/.config/tmux-web/auth.json` | Account file |
 | `TMUX_WEB_TLS` | `~/.config/tmux-web/tls` | Self-signed certificate folder |
 | `TMUX_PERSIST_DIR` | `~/.local/share/tmux-persist` | Snapshot folder |
+| `TMUX_WEB_DATA` | `~/.local/share/tmux-web` | History, directives, approvals, orchestrator state, worktrees |
+| `TMUX_WEB_MAX_ACTIVE` | `4` | Role sessions allowed to work at the same time (orchestrator) |
+| `TMUX_WEB_NAS_ROOT` | (none) | NAS backup path |
 
 `~/.config/tmux-web/` holds the account, login sessions, command buttons and groups, saved desktop setups, web push keys and
 subscriptions, and certificates. It is not part of the repository.
@@ -192,6 +249,17 @@ static/              web UI (index.html, app.js, app.css, login/setup pages)
 install/             install scripts (Ubuntu, macOS)
 deploy/              systemd unit, nginx config, certificate script
 addons/tmux-persist/ session save/restore add-on
+orchestrator.py      orchestrator (node transitions, gates, approvals, time limits, recovery)
+launcher.py          role session setup (worktree, CLAUDE.md, permissions, hooks)
+models.py            organization/process/document definitions and validation
+directives.py        directive queue; bin/directive is the in-session command
+approvals.py         approval items
+history.py           history (JSONL)
+*_api.py             definition, control, directive, approval, event and history APIs
+company/             role and node prompts, example definition
+gates/               gate scripts
+hooks/               Claude Code hook script
+ops/                 NAS sync
 ```
 
 ## License
