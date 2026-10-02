@@ -14,7 +14,7 @@ PANE_FMT = "\t".join(
 
 CLAUDE_HINT = re.compile(r"shift\+tab to cycle|\? for shortcuts|esc to interrupt")
 CLAUDE_WAITING = re.compile(r"Do you want to|Would you like to|Enter to (select|confirm)|❯ 1\. Yes")
-CLAUDE_WORKING = "esc to interrupt"
+CLAUDE_WORKING = re.compile(r"esc to interrupt|…\s*\(\d+[hms]")
 BOX_BORDER = re.compile(r"^\s*[─━]{10,}")
 NOISE = re.compile(r"new task\? /clear|Update installed|^\s*⎿\s+Tip:")
 
@@ -71,7 +71,7 @@ def analyze(command: str, text: str) -> tuple[str, list[str]]:
     if is_claude:
         if CLAUDE_WAITING.search(tail):
             state = "waiting"
-        elif CLAUDE_WORKING in tail:
+        elif CLAUDE_WORKING.search(tail):
             state = "working"
         else:
             state = "idle"
