@@ -28,6 +28,7 @@
       <button id="notify" title="알림 켜기/끄기">🔕</button>
       <button id="logout" title="로그아웃">⏻</button>
     </header>
+    <button id="stopall" title="모든 Claude 세션에 Esc를 보내고 자동 진행을 멈춥니다">⏹ 비상 정지</button>
     <div id="listtools">
       <select id="sort" title="정렬">
         <option value="name-asc">이름 ↑ (오름차순)</option>
@@ -213,6 +214,7 @@
   </form>
 </dialog>
 
+<div id="stopbar" hidden><span id="stopmsg">비상 정지 중</span> <button id="stopresume" class="primary">해제</button></div>
 <div id="updatebar" hidden>새 버전이 있습니다 <button id="updatereload" class="primary">새로고침</button><button id="updateclose" title="닫기">×</button></div>
 <div id="ctxmenu" hidden></div>
 <div id="toast" hidden></div>

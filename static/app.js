@@ -99,6 +99,7 @@ async function refresh() {
     toast('목록 오류: ' + e.message);
     return;
   }
+  loadStopState();
   renderList();
   renderTabs();
   renderWinbar();
@@ -534,6 +535,42 @@ async function moveTo(g) {
 }
 
 let drag = null;
+
+function renderStop(info) {
+  $('stopbar').hidden = !info;
+  $('stopall').hidden = !!info;
+  if (info) {
+    const at = info.at ? new Date(info.at * 1000).toLocaleTimeString('ko-KR') : '';
+    $('stopmsg').textContent = `비상 정지 중${at ? ` (${at}부터)` : ''} · 자동 진행이 멈춰 있습니다`;
+  }
+}
+
+async function loadStopState() {
+  try {
+    renderStop((await api('GET', '/control/status')).stopped);
+  } catch {}
+}
+
+$('stopall').onclick = async () => {
+  if (!confirm('모든 Claude 세션에 Esc를 보내 작업을 멈추고, 자동 진행을 정지할까요?')) return;
+  try {
+    const r = await api('POST', '/control/stop_all');
+    renderStop(r);
+    toast(r.failed.length ? `정지 신호 실패: ${r.failed.join(', ')}` : `Claude 세션 ${r.sessions.length}개에 정지 신호를 보냈습니다`, 4000);
+  } catch (e) {
+    toast(e.message);
+  }
+};
+
+$('stopresume').onclick = async () => {
+  try {
+    await api('POST', '/control/resume');
+    renderStop(null);
+    toast('비상 정지를 해제했습니다');
+  } catch (e) {
+    toast(e.message);
+  }
+};
 
 function dropGroupAt(el) {
   const li = el?.closest?.('#sessions li');
