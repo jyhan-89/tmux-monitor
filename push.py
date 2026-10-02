@@ -16,7 +16,7 @@ log = logging.getLogger("tmux-web")
 POLL_INTERVAL = 2.0
 VAPID_FILE = store.path("vapid.pem")
 SUBS_FILE = "push_subs.json"
-VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://github.com/jyhan-89/tmux-monitor")
+VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://github.com/jyhan-89/tmux-web-monitor")
 
 status: dict[str, dict] = {}
 _pending: dict[str, str] = {}
