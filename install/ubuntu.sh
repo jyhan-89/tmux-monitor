@@ -96,6 +96,17 @@ if [[ $WITH_ORCH == 1 ]]; then
     systemctl --user enable tmux-web-orchestrator >/dev/null 2>&1
     systemctl --user restart tmux-web-orchestrator
     ok "오케스트레이터 실행 (systemctl --user status tmux-web-orchestrator)"
+    if [[ -n "${TMUX_WEB_NAS_ROOT:-}" ]]; then
+      for f in tmux-web-nas-sync.service tmux-web-nas-sync.timer; do
+        sed -e "s#%h/dev_monitor#$APP_DIR#g" "$APP_DIR/deploy/$f" > "$unit_dir/$f"
+      done
+      sed -i "/^\[Service\]/a Environment=TMUX_WEB_NAS_ROOT=$TMUX_WEB_NAS_ROOT\nEnvironment=PORT=$PORT" "$unit_dir/tmux-web-nas-sync.service"
+      sed -i "/^\[Service\]/a Environment=TMUX_WEB_NAS_ROOT=$TMUX_WEB_NAS_ROOT" "$unit_dir/tmux-web.service"
+      systemctl --user daemon-reload
+      systemctl --user enable --now tmux-web-nas-sync.timer >/dev/null 2>&1
+      systemctl --user restart tmux-web
+      ok "NAS 동기화 매시간 ($TMUX_WEB_NAS_ROOT)"
+    fi
   fi
 fi
 
