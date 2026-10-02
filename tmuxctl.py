@@ -89,3 +89,24 @@ def analyze(command: str, text: str) -> tuple[str, list[str]]:
 
 def valid_name(name: str) -> bool:
     return bool(name) and not any(c in name for c in ".:") and name == name.strip()
+
+
+ROLE_PART = r"[a-z][a-z0-9_]*"
+ROLE_SESSION = re.compile(rf"^({ROLE_PART})-({ROLE_PART})-({ROLE_PART})(?:-([a-z0-9_]+))?$")
+
+
+def role_session_name(division: str, dept: str, role: str, suffix: str | int | None = None) -> str:
+    parts = [division, dept, role]
+    if any(not re.fullmatch(ROLE_PART, p) for p in parts) or (
+        suffix not in (None, "") and not re.fullmatch(r"[a-z0-9_]+", str(suffix))
+    ):
+        raise ValueError(f"세션 이름으로 쓸 수 없는 값입니다: {parts + [suffix]}")
+    return "-".join(parts + ([str(suffix)] if suffix not in (None, "") else []))
+
+
+def parse_role_session(name: str) -> dict | None:
+    m = ROLE_SESSION.match(name)
+    if not m:
+        return None
+    division, dept, role, suffix = m.groups()
+    return {"division": division, "dept": dept, "role": role, "suffix": suffix}
