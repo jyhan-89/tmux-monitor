@@ -203,3 +203,16 @@ def wake(name: str, text: str = "inbox 확인") -> bool:
         return False
     return tmuxctl.tmux("send-keys", "-t", f"={name}:", "-l", text).returncode == 0 and \
         tmuxctl.tmux("send-keys", "-t", f"={name}:", "Enter").returncode == 0
+
+
+def restart(name: str) -> dict:
+    meta = sessions_meta.get(name)
+    parsed = tmuxctl.parse_role_session(name)
+    if not meta or not parsed:
+        raise LaunchError(f"역할 세션이 아닙니다: {name}")
+    branch = meta.get("branch", "")
+    feature = branch.split("/")[1] if branch.startswith("feat/") and branch.count("/") >= 2 else ""
+    tmuxctl.tmux("kill-session", "-t", f"={name}")
+    tokens.revoke_session(name)
+    history.record({"type": "session_stop", "session": name, "source": "launcher", "reason": "restart"})
+    return launch(parsed["division"], parsed["dept"], parsed["role"], parsed["suffix"], feature)

@@ -7,8 +7,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
+import commands
 import history
 import models
 import tokens
@@ -62,8 +64,22 @@ class Server:
     def deliver(self, session: str) -> None:
         self.call("POST", f"/directives/deliver/{session}")
 
-    def wake(self, session: str) -> bool:
-        return self.call("POST", f"/control/wake/{session}")["woken"]
+    def wake(self, session: str, text: str | None = None) -> bool:
+        return self.call("POST", f"/control/wake/{session}", {"text": text} if text else None)["woken"]
+
+    def restart(self, session: str) -> dict:
+        return self.call("POST", f"/company/sessions/{session}/restart")
+
+    def approval_create(self, kind: str, instance: str, node: str, summary: str, evidence: list[str],
+                        options: list[str] | None = None, session: str | None = None) -> dict:
+        return self.call("POST", "/approvals", {"kind": kind, "instance": instance, "node": node, "summary": summary,
+                                                 "evidence": evidence, "options": options, "session": session})
+
+    def approval(self, aid: str) -> dict:
+        return self.call("GET", f"/approvals/{aid}")
+
+    def approval_close(self, aid: str, reason: str) -> dict:
+        return self.call("POST", f"/approvals/{aid}/close", {"reason": reason})
 
 
 def state_dir() -> Path:
@@ -86,7 +102,11 @@ def save(inst: dict) -> None:
 
 
 def instances() -> list[dict]:
-    return [json.loads(p.read_text()) for p in sorted(state_dir().glob("*/*.json"))] if state_dir().exists() else []
+    return commands.instances()
+
+
+def load(division: str, feature: str) -> dict:
+    return json.loads(state_path(division, feature).read_text())
 
 
 def new_instance(company: models.Company, division: str, feature: str, brief: str = "") -> dict:
@@ -98,7 +118,8 @@ def new_instance(company: models.Company, division: str, feature: str, brief: st
         raise ValueError(f"이미 있는 인스턴스: {division}/{feature}")
     inst = {"division": division, "feature": feature, "template": tkey, "brief": brief, "status": "running",
             "node": company.process.templates[tkey].start, "entered": time.time(), "directives": {}, "attempt": 0,
-            "counters": {}, "source_node": None, "nudged": 0, "last_wake": 0, "note": "", "outputs": {}}
+            "counters": {}, "source_node": None, "nudged": 0, "last_wake": 0, "note": "", "outputs": {},
+            "approval": None, "approved": None, "paused": 0, "wait_started": None, "asks": {}, "prev_node": None}
     save(inst)
     history.record({"type": "node_enter", "session": "-", "division": division, "feature": feature, "node": inst["node"]})
     return inst
@@ -167,71 +188,284 @@ def node_body(company: models.Company, inst: dict, node: models.Node, layer: str
     return header + "\n" + text.strip() + ("\n\n" + "\n\n".join(extra) if extra else "") + "\n"
 
 
-class Orchestrator:
-    def __init__(self, server: Server):
-        self.server = server
+PRIORITY_ROLES = {"sil": 0, "hil": 0, "analysis": 1}
 
-    def tick(self) -> None:
+
+def priority(company: models.Company, inst: dict) -> int:
+    t = company.process.templates[inst["template"]]
+    node = t.nodes.get(inst["node"])
+    return PRIORITY_ROLES.get(node.role if node else "", 2)
+
+
+def escalate_node(template: models.Template) -> str | None:
+    if "escalate" in template.nodes and template.nodes["escalate"].type == "approval":
+        return "escalate"
+    return next((k for k, n in template.nodes.items() if n.type == "approval"), None)
+
+
+def iso_age(ts: str, now: float) -> float:
+    try:
+        return now - datetime.fromisoformat(ts).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+class Orchestrator:
+    def __init__(self, server: Server, max_active: int | None = None):
+        self.server = server
+        self.max_active = max_active or int(os.environ.get("TMUX_WEB_MAX_ACTIVE", "4"))
+
+    def tick(self, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        company = self.server.company()
+        for cmd in commands.take():
+            self.command(company, cmd)
         if self.server.stopped():
             return
-        company = self.server.company()
         sessions = self.server.role_sessions()
-        for inst in instances():
-            if inst["status"] != "running":
-                continue
+        active = sum(1 for s in sessions.values() if s.get("state") == "working")
+        running = [i for i in instances() if i["status"] == "running"]
+        running.sort(key=lambda i: (priority(company, i), i.get("entered", 0)))
+        for inst in running:
             try:
-                self.step(company, sessions, inst)
+                active += self.step(company, sessions, inst, now, active)
             except ApiError as e:
                 log.warning("%s/%s: %s", inst["division"], inst["feature"], e)
 
-    def step(self, company: models.Company, sessions: dict, inst: dict) -> None:
+    def command(self, company: models.Company, cmd: dict) -> None:
+        try:
+            if cmd["cmd"] == "start":
+                new_instance(company, cmd["division"], cmd["feature"], cmd.get("brief", ""))
+            elif cmd["cmd"] == "transition":
+                inst = load(cmd["division"], cmd["feature"])
+                template = company.process.templates[inst["template"]]
+                if cmd["to"] not in template.nodes:
+                    raise ValueError(f"노드 '{cmd['to']}'이(가) 없습니다")
+                history.record({"type": "manual_transition", "session": "-", "division": inst["division"],
+                                "feature": inst["feature"], "from": inst["node"], "to": cmd["to"], "reason": cmd.get("reason")})
+                inst["status"] = "running"
+                self.move(inst, cmd["to"], note=cmd.get("reason", ""))
+            elif cmd["cmd"] == "restored":
+                for inst in instances():
+                    if inst["status"] == "running" and inst["directives"]:
+                        inst["restored"] = True
+                        save(inst)
+        except (ValueError, KeyError, FileNotFoundError, ApiError) as e:
+            log.warning("명령 실패 %s: %s", cmd, e)
+
+    def step(self, company: models.Company, sessions: dict, inst: dict, now: float, active: int) -> int:
         template = company.process.templates[inst["template"]]
         div = company.org.divisions[inst["division"]]
         node = template.nodes[inst["node"]]
         if node.type == "terminal":
             self.finish(inst, "done")
-            return
+            return 0
         if node.type == "approval":
-            self.finish(inst, "escalated")
-            return
+            self.escalation(template, inst, node)
+            return 0
+        if node.requires_approval and inst.get("approved") != node.id:
+            self.gate_approval(template, inst, node, now)
+            return 0
+        if self.timed_out(template, inst, now):
+            return 0
         if not inst["directives"]:
-            self.start_node(company, sessions, inst, node)
-            return
+            if active >= self.max_active:
+                if not inst.get("queued"):
+                    inst["queued"] = True
+                    save(inst)
+                    history.record({"type": "status_change", "session": "-", "division": inst["division"],
+                                    "feature": inst["feature"], "node": node.id, "to": "queued"})
+                return 0
+            inst["queued"] = False
+            return self.start_node(company, sessions, inst, node)
         ds = {key: self.server.directive(did) for key, did in inst["directives"].items()}
+        if inst.pop("restored", False):
+            self.recover(company, sessions, inst, ds)
+            return 0
+        self.needs_input(sessions, inst, node, ds)
+        if self.ack_timeout(template, inst, ds, now):
+            return 0
         bad = [d for d in ds.values() if d["status"] in ("blocked", "rejected")]
         if bad:
             reasons = "; ".join(f"{d['to']} {d['status']}: {d['status_log'][-1].get('reason', '')}" for d in bad)
             self.fail(template, inst, node, reasons)
-            return
+            return 0
         if all(d["status"] == "done" for d in ds.values()):
-            missing = [d["to"] for d in ds.values() if not d.get("refs")]
-            if missing:
-                self.fail(template, inst, node, f"산출물 참조(--ref) 없이 done: {', '.join(missing)}")
-                return
-            ok, report = True, []
-            for key, d in ds.items():
-                wt = (sessions.get(d["to"], {}).get("meta") or {}).get("worktree", "")
-                for g in (node.pre_gate, node.gate):
-                    if not g:
-                        continue
-                    passed, tail = run_gate(g, div, wt, inst["feature"], node.id)
-                    history.record({"type": "gate_result", "session": d["to"], "division": inst["division"],
-                                    "feature": inst["feature"], "node": node.id, "gate": g,
-                                    "result": "pass" if passed else "fail", "tail": tail})
-                    if not passed:
-                        ok = False
-                        report.append(f"[{d['to']}] {g}\n{tail}")
-                        break
-            if ok:
-                inst.setdefault("outputs", {})[node.id] = [r for d in ds.values() for r in d.get("refs", [])]
-                self.advance(template, inst, node, node.next, passed=True)
-            else:
-                self.fail(template, inst, node, "\n\n".join(report))
-            return
-        self.nudge(sessions, inst, ds)
+            self.judge(template, div, sessions, inst, node, ds)
+            return 0
+        self.nudge(sessions, inst, ds, now)
+        return 0
 
-    def nudge(self, sessions: dict, inst: dict, ds: dict) -> None:
-        now = time.time()
+    def judge(self, template, div, sessions, inst, node, ds) -> None:
+        missing = [d["to"] for d in ds.values() if not d.get("refs")]
+        if missing:
+            self.fail(template, inst, node, f"산출물 참조(--ref) 없이 done: {', '.join(missing)}")
+            return
+        ok, report = True, []
+        for d in ds.values():
+            wt = (sessions.get(d["to"], {}).get("meta") or {}).get("worktree", "")
+            for g in (node.pre_gate, node.gate):
+                if not g:
+                    continue
+                passed, tail = run_gate(g, div, wt, inst["feature"], node.id)
+                history.record({"type": "gate_result", "session": d["to"], "division": inst["division"],
+                                "feature": inst["feature"], "node": node.id, "gate": g,
+                                "result": "pass" if passed else "fail", "tail": tail})
+                if not passed:
+                    ok = False
+                    report.append(f"[{d['to']}] {g}\n{tail}")
+                    break
+        if ok:
+            inst.setdefault("outputs", {})[node.id] = [r for d in ds.values() for r in d.get("refs", [])]
+            self.advance(template, inst, node, node.next, passed=True)
+        else:
+            self.fail(template, inst, node, "\n\n".join(report))
+
+    def instance_id(self, inst: dict) -> str:
+        return f"{inst['division']}/{inst['feature']}"
+
+    def evidence(self, inst: dict) -> list[str]:
+        return [r for refs in (inst.get("outputs") or {}).values() for r in refs]
+
+    def wait_begin(self, inst: dict, now: float) -> None:
+        if not inst.get("wait_started"):
+            inst["wait_started"] = now
+
+    def wait_end(self, inst: dict, now: float) -> None:
+        if inst.get("wait_started"):
+            inst["paused"] = inst.get("paused", 0) + now - inst["wait_started"]
+            inst["wait_started"] = None
+
+    def gate_approval(self, template, inst, node, now) -> None:
+        aid = inst.get("approval")
+        if not aid:
+            outputs = inst.get("outputs") or {}
+            summary = (f"{self.instance_id(inst)} '{node.id}' 진행 승인 요청. 통과한 단계: {', '.join(outputs) or '없음'}."
+                       + (f" 참고: {inst['note'][:200]}" if inst.get("note") else ""))
+            a = self.server.approval_create("gate", self.instance_id(inst), node.id, summary, self.evidence(inst))
+            inst["approval"] = a["id"]
+            self.wait_begin(inst, now)
+            save(inst)
+            return
+        a = self.server.approval(aid)
+        if a["status"] == "pending":
+            return
+        inst["approval"] = None
+        self.wait_end(inst, now)
+        decision, reason = a.get("decision"), a.get("reason") or ""
+        if decision == "approve":
+            inst["approved"] = node.id
+            save(inst)
+        elif decision == "revise":
+            inst["note"] = f"결재 수정 요청: {reason}"
+            prev = inst.get("prev_node")
+            if prev and prev in template.nodes:
+                self.move(inst, prev, note=inst["note"])
+            else:
+                save(inst)
+        else:
+            self.fail(template, inst, node, f"결재 반려: {reason}", allow_retry=False)
+
+    def escalation(self, template, inst, node) -> None:
+        aid = inst.get("approval")
+        if not aid:
+            summary = (f"{self.instance_id(inst)} 에스컬레이션 (발생 노드: {inst.get('escalated_from') or inst.get('prev_node') or '-'}). "
+                       f"{(inst.get('note') or '')[:300]}")
+            a = self.server.approval_create("escalate", self.instance_id(inst), node.id, summary, self.evidence(inst), node.options)
+            inst["approval"] = a["id"]
+            inst["status_detail"] = "escalated"
+            save(inst)
+            history.record({"type": "escalate", "session": "-", "division": inst["division"], "feature": inst["feature"],
+                            "node": node.id, "from": inst.get("escalated_from"), "approval": a["id"]})
+            return
+        a = self.server.approval(aid)
+        if a["status"] == "pending":
+            return
+        inst["approval"] = None
+        inst["status_detail"] = None
+        decision, reason = a.get("decision"), a.get("reason") or ""
+        if decision == "redesign":
+            inst["counters"] = {}
+            self.move(inst, template.start, note=f"재설계 지시: {reason}")
+        elif decision == "drop":
+            inst["note"] = f"중단: {reason}"
+            self.finish(inst, "dropped")
+        elif decision == "override":
+            src = template.nodes.get(inst.get("escalated_from") or "")
+            target = src.next if src and src.next else template.start
+            self.move(inst, target, note=f"결재로 통과 처리: {reason}")
+        elif decision in template.nodes:
+            self.move(inst, decision, note=reason)
+
+    def needs_input(self, sessions, inst, node, ds) -> None:
+        asks = inst.setdefault("asks", {})
+        for d in ds.values():
+            name = d["to"]
+            state = sessions.get(name, {}).get("state")
+            if state == "waiting" and name not in asks:
+                a = self.server.approval_create("needs_input", self.instance_id(inst), node.id,
+                                                f"{name} 세션이 입력을 기다립니다. 터미널에서 답하면 자동으로 닫힙니다.", [], None, name)
+                asks[name] = a["id"]
+                save(inst)
+            elif state != "waiting" and name in asks:
+                self.server.approval_close(asks.pop(name), "세션이 다시 진행됨")
+                save(inst)
+
+    def timed_out(self, template, inst, now) -> bool:
+        limit = template.limits.get("node_timeout_h")
+        if not limit:
+            return False
+        spent = now - inst["entered"] - inst.get("paused", 0)
+        if spent <= limit * 3600:
+            return False
+        node = template.nodes[inst["node"]]
+        self.to_escalate(template, inst, node, f"노드 시간 상한 {limit}시간 초과")
+        return True
+
+    def ack_timeout(self, template, inst, ds, now) -> bool:
+        limit = template.limits.get("ack_timeout_h")
+        if not limit:
+            return False
+        late = [d for d in ds.values() if d["status"] == "delivered"
+                and iso_age(next((x["at"] for x in reversed(d["status_log"]) if x["to"] == "delivered"), ""), now) > limit * 3600]
+        if not late:
+            return False
+        node = template.nodes[inst["node"]]
+        if inst.get("ack_restarted"):
+            self.to_escalate(template, inst, node, f"지시서 확인 없음 (재시작 후에도): {', '.join(d['to'] for d in late)}")
+            return True
+        for d in late:
+            self.server.restart(d["to"])
+            self.server.deliver(d["to"])
+            self.server.wake(d["to"])
+        inst["ack_restarted"] = True
+        save(inst)
+        history.record({"type": "session_stop", "session": ",".join(d["to"] for d in late), "reason": "ack_timeout_restart",
+                        "division": inst["division"], "feature": inst["feature"], "node": node.id})
+        return True
+
+    def to_escalate(self, template, inst, node, reason) -> None:
+        target = escalate_node(template)
+        inst["note"] = reason
+        inst["escalated_from"] = node.id
+        history.record({"type": "node_done", "session": "-", "division": inst["division"], "feature": inst["feature"],
+                        "node": node.id, "result": "timeout", "next": target, "reason": reason})
+        if target:
+            self.move(inst, target, note=reason)
+        else:
+            self.finish(inst, "escalated")
+
+    def recover(self, company, sessions, inst, ds) -> None:
+        for d in ds.values():
+            name = d["to"]
+            if name not in sessions:
+                parsed = name.split("-")
+                self.server.launch(parsed[0], parsed[1], parsed[2], parsed[3] if len(parsed) > 3 else None, inst["feature"])
+            self.server.deliver(name)
+            self.server.wake(name, "inbox 지시서 상태 확인 후 계속")
+        save(inst)
+
+    def nudge(self, sessions: dict, inst: dict, ds: dict, now: float) -> None:
         idle = [d["to"] for d in ds.values() if d["status"] in ("delivered", "acked", "in_progress")
                 and sessions.get(d["to"], {}).get("state") == "idle"]
         if not idle or now - inst["last_wake"] < NUDGE_AFTER:
@@ -242,9 +476,10 @@ class Orchestrator:
         inst["nudged"] += 1
         save(inst)
 
-    def start_node(self, company: models.Company, sessions: dict, inst: dict, node: models.Node) -> None:
+    def start_node(self, company: models.Company, sessions: dict, inst: dict, node: models.Node) -> int:
         dept_key, dept = placement(company, inst["division"], node.role)
         layers = (dept.layers if dept and node.parallel else []) or [None]
+        dtype = "merge" if node.role == "integrator" and "merge" in company.documents.directives else "node"
         sent = {}
         for layer in layers:
             index = layer
@@ -254,19 +489,20 @@ class Orchestrator:
                 index = "1" if count > 1 else None
             launched = self.server.launch(inst["division"], dept_key, node.role, index, inst["feature"])
             name = launched["name"]
-            d = self.server.send("node", name, node_body(company, inst, node, layer))
+            d = self.server.send(dtype, name, node_body(company, inst, node, layer))
             if d["status"] == "queued":
                 self.server.deliver(name)
             self.server.wake(name)
             sent[layer or node.role] = d["id"]
-        inst.update(directives=sent, last_wake=time.time(), nudged=0)
+        inst.update(directives=sent, last_wake=time.time(), nudged=0, ack_restarted=False)
         save(inst)
         history.record({"type": "node_enter", "session": ",".join(sent), "division": inst["division"],
                         "feature": inst["feature"], "node": node.id, "directives": list(sent.values())})
+        return len(sent)
 
-    def fail(self, template: models.Template, inst: dict, node: models.Node, reason: str) -> None:
+    def fail(self, template: models.Template, inst: dict, node: models.Node, reason: str, allow_retry: bool = True) -> None:
         inst["note"] = reason
-        if inst["attempt"] < node.retry:
+        if allow_retry and inst["attempt"] < node.retry:
             inst["attempt"] += 1
             inst["directives"] = {}
             save(inst)
@@ -276,6 +512,8 @@ class Orchestrator:
         target = template.nodes.get(node.on_fail)
         if target and target.loop:
             inst["source_node"] = node.id
+        if target and target.type == "approval":
+            inst["escalated_from"] = node.id
         self.advance(template, inst, node, node.on_fail, passed=False)
 
     def advance(self, template: models.Template, inst: dict, node: models.Node, target: str, passed: bool) -> None:
@@ -286,20 +524,24 @@ class Orchestrator:
                             "node": node.id, "source_node": src, "count": inst["counters"][src], "max": node.loop.max.get(src)})
             if inst["counters"][src] > node.loop.max.get(src, 0):
                 target = node.loop.on_exceed
+                inst["escalated_from"] = src
             inst["source_node"] = None
         history.record({"type": "node_done", "session": "-", "division": inst["division"], "feature": inst["feature"],
                         "node": node.id, "result": "pass" if passed else "fail", "next": target})
-        if passed:
-            inst["note"] = ""
-        inst.update(node=target, directives={}, attempt=0, entered=time.time(), nudged=0)
+        self.move(inst, target, note="" if passed else inst.get("note", ""))
+
+    def move(self, inst: dict, target: str, note: str = "") -> None:
+        inst["prev_node"] = inst["node"]
+        inst.update(node=target, directives={}, attempt=0, entered=time.time(), nudged=0, note=note,
+                    approval=None, approved=None, paused=0, wait_started=None, ack_restarted=False, asks={})
         save(inst)
         history.record({"type": "node_enter", "session": "-", "division": inst["division"], "feature": inst["feature"], "node": target})
 
     def finish(self, inst: dict, status: str) -> None:
         inst["status"] = status
         save(inst)
-        history.record({"type": "escalate" if status == "escalated" else "node_done", "session": "-",
-                        "division": inst["division"], "feature": inst["feature"], "node": inst["node"], "result": status})
+        history.record({"type": "node_done", "session": "-", "division": inst["division"], "feature": inst["feature"],
+                        "node": inst["node"], "result": status})
 
 
 def dry_run(folder: Path) -> int:

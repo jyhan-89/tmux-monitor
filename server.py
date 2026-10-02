@@ -30,6 +30,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from send2trash import send2trash
 
+import approvals
+import approvals_api
 import auth
 import company_api
 import control_api
@@ -947,6 +949,8 @@ router.include_router(company_api.router)
 router.include_router(control_api.router)
 router.include_router(directives_api.router)
 router.include_router(event_api.router)
+router.include_router(approvals_api.router)
+approvals.notify = push.send_all
 
 
 def set_winsize(fd: int, rows: int, cols: int) -> None:

@@ -41,6 +41,8 @@ templates:
         options: [redesign, drop]
       done:
         type: terminal
+    limits:
+      node_timeout_h: 24
 """
 
 
@@ -52,6 +54,9 @@ class FakeServer:
         self.woken: list[str] = []
         self.is_stopped = False
         self.n = 0
+        self.wake_texts = []
+        self.restarted = []
+        self.approvals = {}
 
     def stopped(self):
         return self.is_stopped
@@ -80,9 +85,37 @@ class FakeServer:
     def deliver(self, session):
         pass
 
-    def wake(self, session):
+    def wake(self, session, text=None):
         self.woken.append(session)
+        self.wake_texts.append(text)
         return True
+
+    def restart(self, session):
+        self.restarted.append(session)
+        return {"name": session}
+
+    def approval_create(self, kind, instance, node, summary, evidence, options=None, session=None):
+        for a in self.approvals.values():
+            if a["status"] == "pending" and (a["kind"], a["instance"], a["node"]) == (kind, instance, node):
+                return a
+        aid = f"ap-{len(self.approvals) + 1}"
+        self.approvals[aid] = {"id": aid, "kind": kind, "instance": instance, "node": node, "summary": summary,
+                               "evidence": evidence, "options": options, "session": session, "status": "pending"}
+        return self.approvals[aid]
+
+    def approval(self, aid):
+        return self.approvals[aid]
+
+    def approval_close(self, aid, reason):
+        self.approvals[aid]["status"] = "closed"
+        return self.approvals[aid]
+
+    def decide(self, decision, reason="사유", kind=None):
+        for a in self.approvals.values():
+            if a["status"] == "pending" and (kind is None or a["kind"] == kind):
+                a.update(status="decided", decision=decision, reason=reason)
+                return a
+        raise AssertionError("pending approval 없음")
 
     def finish_all(self, status="done", refs=("feat/x@1",), reason=None):
         for d in self.directives.values():
@@ -175,7 +208,9 @@ def test_retry_then_on_fail_and_loop_counter(env):
     orch.tick()
     assert inst()["node"] == "escalate" and inst()["counters"] == {"implement": 2}
     orch.tick()
-    assert inst()["status"] == "escalated"
+    a = next(iter(server.approvals.values()))
+    assert a["kind"] == "escalate" and a["options"] == ["redesign", "drop"] and inst()["status_detail"] == "escalated"
+    assert "implement" in a["summary"]
 
 
 def test_blocked_and_missing_refs_fail(env):
@@ -231,3 +266,169 @@ def test_dry_run(capsys):
     assert orchestrator.dry_run(SAMPLE) == 0
     out = capsys.readouterr().out
     assert "analyze (analysis): pass→design" in out and "escalate: 결재" in out
+
+
+def run_to_escalate(orch, server, gates):
+    gates["review"] = [False]
+    for _ in range(3):
+        orch.tick()
+        server.finish_all()
+    orch.tick()
+    assert inst()["node"] == "analyze"
+    orch.tick()
+    server.finish_all()
+    orch.tick()
+    assert inst()["node"] == "implement"
+    gates["review"] = [False]
+    for _ in range(4):
+        orch.tick()
+        server.finish_all()
+    orch.tick()
+    orch.tick()
+    server.finish_all()
+    orch.tick()
+    assert inst()["node"] == "escalate", inst()
+    orch.tick()
+
+
+@pytest.mark.parametrize("decision, node, status", [("redesign", "implement", "running"), ("drop", "escalate", "dropped")])
+def test_escalation_decisions(env, decision, node, status):
+    orch, server, gates, _ = env
+    run_to_escalate(orch, server, gates)
+    server.decide(decision)
+    orch.tick()
+    assert inst()["node"] == node and inst()["status"] == status
+    if decision == "redesign":
+        assert inst()["counters"] == {} and "재설계" in inst()["note"]
+
+
+def test_override_goes_to_next_of_source(env, monkeypatch):
+    orch, server, gates, _ = env
+    company = server.company()
+    company.process.templates["mini"].nodes["escalate"].options = ["redesign", "drop", "override"]
+    run_to_escalate(orch, server, gates)
+    assert inst()["escalated_from"] == "review"
+    server.decide("override")
+    orch.tick()
+    assert inst()["node"] == "done"
+
+
+def test_gate_approval_before_start(env):
+    orch, server, gates, _ = env
+    company = server.company()
+    company.process.templates["mini"].nodes["review"].requires_approval = True
+    orch.tick()
+    server.finish_all()
+    orch.tick()
+    assert inst()["node"] == "review"
+    orch.tick()
+    a = next(a for a in server.approvals.values() if a["kind"] == "gate")
+    assert a["evidence"] == ["feat/x@1", "feat/x@1"] and inst()["directives"] == {}
+    orch.tick()
+    assert "mw-quality-reviewer" not in server.sessions
+    server.decide("approve")
+    orch.tick()
+    assert inst()["approved"] == "review"
+    orch.tick()
+    assert "mw-quality-reviewer" in server.sessions
+
+
+def test_gate_approval_reject_and_revise(env):
+    orch, server, gates, _ = env
+    company = server.company()
+    company.process.templates["mini"].nodes["review"].requires_approval = True
+    orch.tick()
+    server.finish_all()
+    orch.tick()
+    orch.tick()
+    server.decide("revise", "테스트 보강")
+    orch.tick()
+    assert inst()["node"] == "implement" and "테스트 보강" in inst()["note"]
+    orch.tick()
+    assert "테스트 보강" in list(server.directives.values())[-1]["body"]
+    server.finish_all()
+    orch.tick()
+    orch.tick()
+    server.decide("reject", "범위 초과")
+    orch.tick()
+    assert inst()["node"] == "analyze" and "범위 초과" in inst()["note"]
+
+
+def test_needs_input_opens_and_closes(env):
+    orch, server, _, _ = env
+    orch.tick()
+    server.sessions["mw-impl-impl-proxy"]["state"] = "waiting"
+    orch.tick()
+    ni = [a for a in server.approvals.values() if a["kind"] == "needs_input"]
+    assert len(ni) == 1 and ni[0]["session"] == "mw-impl-impl-proxy"
+    orch.tick()
+    assert len([a for a in server.approvals.values() if a["kind"] == "needs_input"]) == 1
+    server.sessions["mw-impl-impl-proxy"]["state"] = "working"
+    orch.tick()
+    assert ni[0]["status"] == "closed"
+
+
+def test_node_timeout_escalates_excluding_wait(env):
+    orch, server, _, _ = env
+    import time as _t
+    orch.tick()
+    state = inst()
+    state["entered"] -= 24 * 3600 + 10
+    state["paused"] = 20
+    orchestrator.save(state)
+    orch.tick()
+    assert inst()["node"] == "implement"
+    state = inst()
+    state["paused"] = 0
+    orchestrator.save(state)
+    orch.tick()
+    assert inst()["node"] == "escalate" and "시간 상한" in inst()["note"]
+
+
+def test_ack_timeout_restarts_once_then_escalates(env):
+    orch, server, _, _ = env
+    company = server.company()
+    company.process.templates["mini"].limits["ack_timeout_h"] = 1
+    orch.tick()
+    old = "2000-01-01T00:00:00+09:00"
+    for d in server.directives.values():
+        d["status_log"] = [{"to": "delivered", "at": old}]
+    orch.tick()
+    assert sorted(server.restarted) == ["mw-impl-impl-proxy", "mw-impl-impl-skeleton"] and inst()["ack_restarted"]
+    orch.tick()
+    assert inst()["node"] == "escalate" and "확인 없음" in inst()["note"]
+
+
+def test_queue_when_active_limit_reached(env):
+    orch, server, _, _ = env
+    orch.max_active = 2
+    orchestrator.new_instance(server.company(), "mw", "svc_b")
+    orch.tick()
+    states = {i["feature"]: i for i in orchestrator.instances()}
+    assert states["svc_a"]["directives"] and not states["svc_b"]["directives"] and states["svc_b"]["queued"]
+    for s in server.sessions.values():
+        s["state"] = "idle"
+    server.finish_all()
+    orch.tick()
+    states = {i["feature"]: i for i in orchestrator.instances()}
+    assert states["svc_b"]["directives"]
+
+
+def test_commands_start_transition_restored(env):
+    orch, server, _, _ = env
+    import commands
+    commands.put("start", division="mw", feature="svc_c", brief="")
+    orch.tick()
+    assert {i["feature"] for i in orchestrator.instances()} == {"svc_a", "svc_c"}
+    commands.put("transition", division="mw", feature="svc_a", to="review", reason="수동")
+    orch.tick()
+    a = orchestrator.load("mw", "svc_a")
+    assert a["node"] == "review" and a["directives"]
+    assert history.query(type="manual_transition")[0]["to"] == "review"
+    server.wake_texts.clear()
+    commands.put("restored")
+    orch.tick()
+    assert "inbox 지시서 상태 확인 후 계속" in server.wake_texts
+    commands.put("transition", division="mw", feature="svc_a", to="nowhere")
+    orch.tick()
+    assert orchestrator.load("mw", "svc_a")["node"] == "review"

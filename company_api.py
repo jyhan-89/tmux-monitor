@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+import commands
 import launcher
 import models
 import push
@@ -96,6 +97,42 @@ def launch_session(body: Launch, _: dict = Depends(tokens.require("sessions.laun
         return launcher.launch(body.division, body.dept, body.role, body.index, body.feature)
     except (launcher.LaunchError, ValueError) as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/sessions/{name}/restart")
+def restart_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
+    try:
+        return launcher.restart(name)
+    except (launcher.LaunchError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/instances")
+def list_instances(_: dict = Depends(tokens.require("company.read"))):
+    return commands.instances()
+
+
+class StartInstance(BaseModel):
+    division: str
+    feature: str
+    brief: str = ""
+
+
+@router.post("/instances")
+def start_instance(body: StartInstance, _: dict = Depends(tokens.require("company.write"))):
+    if not models.IDENT.match(body.feature):
+        raise HTTPException(400, "기능 이름은 영소문자·숫자·밑줄로 입력하세요")
+    return commands.put("start", division=body.division, feature=body.feature, brief=body.brief)
+
+
+class Transition(BaseModel):
+    to: str
+    reason: str = ""
+
+
+@router.post("/instances/{division}/{feature}/transition")
+def transition(division: str, feature: str, body: Transition, _: dict = Depends(tokens.require("company.write"))):
+    return commands.put("transition", division=division, feature=feature, to=body.to, reason=body.reason)
 
 
 @router.get("/{kind}")

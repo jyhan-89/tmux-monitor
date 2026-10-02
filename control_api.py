@@ -2,7 +2,9 @@ import json
 import time
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
+import commands
 import history
 import launcher
 import push
@@ -76,8 +78,18 @@ def api_resume(who: dict = Depends(tokens.require("control"))):
     return {"resumed": resume(who["role"])}
 
 
+class Wake(BaseModel):
+    text: str = "inbox 확인"
+
+
 @router.post("/wake/{session}")
-def api_wake(session: str, _: dict = Depends(tokens.require("control"))):
+def api_wake(session: str, body: Wake | None = None, _: dict = Depends(tokens.require("control"))):
     if stopped() is not None:
         return {"woken": False, "reason": "stopped"}
-    return {"woken": launcher.wake(session)}
+    return {"woken": launcher.wake(session, (body or Wake()).text)}
+
+
+@router.post("/restored")
+def api_restored(_: dict = Depends(tokens.require("control"))):
+    history.record({"type": "session_start", "session": "*", "source": "tmux-persist"})
+    return commands.put("restored")
