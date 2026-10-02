@@ -129,13 +129,14 @@ function renderList() {
     for (const s of sorted) ul.appendChild(sessionItem(s, false));
     return;
   }
+  assignGroupColors();
   const walk = (parent, depth) => {
     for (const g of sortGroupNames(groups.filter((x) => parentGroup(x) === parent))) {
       const all = sorted.filter((s) => s.group === g || s.group?.startsWith(`${g}/`));
       ul.appendChild(groupHeader(g, all, depth));
       if (collapsedGroups.has(g)) continue;
-      walk(g, depth + 1);
       for (const s of sorted.filter((x) => x.group === g)) ul.appendChild(sessionItem(s, true, depth + 1));
+      walk(g, depth + 1);
     }
   };
   walk(null, 0);
@@ -155,12 +156,24 @@ const leafName = (g) => g.slice(g.lastIndexOf('/') + 1);
 
 const GROUP_COLORS = ['#4f9cf9', '#4cc38a', '#f0b35a', '#c792ea', '#f07178', '#5fd3d3', '#e88cc4', '#a3c46a'];
 
-function groupColor(g) {
-  const top = g.split('/')[0];
-  let h = 0;
-  for (const ch of top) h = (h * 31 + ch.codePointAt(0)) >>> 0;
-  return GROUP_COLORS[h % GROUP_COLORS.length];
+const groupColorIdx = new Map();
+
+function assignGroupColors() {
+  groupColorIdx.clear();
+  const n = GROUP_COLORS.length;
+  const walk = (parent, pIdx) => {
+    let ci = pIdx < 0 ? 0 : (pIdx + 1) % n;
+    for (const g of sortGroupNames(groups.filter((x) => parentGroup(x) === parent))) {
+      if (ci === pIdx) ci = (ci + 1) % n;
+      groupColorIdx.set(g, ci);
+      walk(g, ci);
+      ci = (ci + 1) % n;
+    }
+  };
+  walk(null, -1);
 }
+
+const groupColor = (g) => GROUP_COLORS[groupColorIdx.get(g) ?? 0];
 
 function groupHeader(g, members, depth = 0) {
   const key = g ?? '';
