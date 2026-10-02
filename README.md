@@ -18,7 +18,7 @@ The UI is in Korean.
 - **Session list**: last 3 lines of output and a status per session (shell, running, Claude working / needs input / idle), sorting, groups (can be nested)
 - **Terminal**: attaches to tmux sessions with xterm.js; reconnects automatically when the connection drops
 - **Split view**: drag a tab to split up/down/left/right, a tab bar per area, resize with the dividers
-- **Virtual desktops**: each desktop keeps its own split layout and tabs; switch with Alt+1–9. A session can be on several desktops
+- **Virtual desktops**: each desktop keeps its own split layout and tabs; switch with Alt+1–9. A session can be on several desktops, and setups can be saved on the server and loaded on other devices
 - **Session management**: create (working folder, start command), rename, kill; switch and close tmux windows/panes
 - **Input**: input box for Korean (IME) text, buttons for frequently used commands, mobile keys (Esc, Ctrl, arrows, …)
 - **Files**: browse under the home folder, view Markdown and code, upload files. Editing, copy, move and delete are optional (off by default)
@@ -152,7 +152,7 @@ sudo tailscale serve --bg http://127.0.0.1:8765     # https://<machine>.<tailnet
 
 `~/.config/tmux-web/` holds the account, login sessions, command buttons and groups, saved desktop setups, web push keys and
 subscriptions, and certificates. It is not part of the repository.
-The currently open desktop layout is stored in the browser (per URL).
+The desktop layout that is currently open is stored in the browser (per URL).
 
 ## Administration
 
