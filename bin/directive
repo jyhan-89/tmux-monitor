@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+URL = os.environ.get("TMUX_WEB_URL", "http://127.0.0.1:8765/dev").rstrip("/")
+TOKEN = os.environ.get("TMUX_WEB_TOKEN", "")
+
+
+def call(method: str, path: str, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{URL}/api/directives{path}", data=data, method=method,
+                                 headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("detail")
+        except (json.JSONDecodeError, AttributeError):
+            detail = e.reason
+        sys.exit(f"directive: {e.code} {detail}")
+    except urllib.error.URLError as e:
+        sys.exit(f"directive: 서버에 연결할 수 없습니다 ({URL}): {e.reason}")
+
+
+def show_line(d: dict) -> str:
+    return f"{d['id']}  {d['status']:<11} {d['priority']:<8} {d['type']:<10} from {d['from']}  v{d['version']}"
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="directive", description="지시서 수신함 조작")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    ls = sub.add_parser("list", help="내 수신함")
+    ls.add_argument("--all", action="store_true", help="끝난 지시서까지")
+    sh = sub.add_parser("show", help="지시서 본문")
+    sh.add_argument("id")
+    for name in ("ack", "start"):
+        sub.add_parser(name).add_argument("id")
+    dn = sub.add_parser("done")
+    dn.add_argument("id")
+    dn.add_argument("--ref", action="append", default=[], help="산출물 참조 (브랜치@커밋, 파일). 여러 번 가능")
+    for name in ("block", "reject"):
+        x = sub.add_parser(name)
+        x.add_argument("id")
+        x.add_argument("--reason", required=True)
+    sd = sub.add_parser("send", help="지시서 작성")
+    sd.add_argument("type")
+    sd.add_argument("--to", required=True)
+    src = sd.add_mutually_exclusive_group(required=True)
+    src.add_argument("--file")
+    src.add_argument("--body")
+    sd.add_argument("--priority", default="normal", choices=["blocking", "normal", "low"])
+    a = p.parse_args(argv)
+    if not TOKEN:
+        sys.exit("directive: TMUX_WEB_TOKEN이 없습니다 (역할 세션 안에서만 쓸 수 있습니다)")
+    if a.cmd == "list":
+        items = call("GET", "?all=true" if a.all else "")
+        print("\n".join(show_line(d) for d in items) if items else "수신함이 비어 있습니다")
+    elif a.cmd == "show":
+        d = call("GET", f"/{a.id}")
+        print(show_line(d))
+        print()
+        print(d["body"])
+    elif a.cmd == "send":
+        body = open(a.file, encoding="utf-8").read() if a.file else a.body
+        d = call("POST", "", {"type": a.type, "to": a.to, "body": body, "priority": a.priority})
+        print(show_line(d))
+    else:
+        status = {"ack": "acked", "start": "in_progress", "done": "done", "block": "blocked", "reject": "rejected"}[a.cmd]
+        body = {"status": status, "reason": getattr(a, "reason", None), "refs": getattr(a, "ref", None)}
+        print(show_line(call("POST", f"/{a.id}/status", body)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
