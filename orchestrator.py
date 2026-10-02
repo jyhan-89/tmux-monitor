@@ -599,11 +599,15 @@ def main(argv: list[str]) -> int:
         print(f"{inst['division']}/{inst['feature']} 시작: {inst['node']}")
         return 0
     orch = Orchestrator(server)
+    last_error = ""
     while True:
         try:
             orch.tick()
-        except ApiError as e:
-            log.warning("%s", e)
+            last_error = ""
+        except (ApiError, models.DefinitionError) as e:
+            if str(e) != last_error:
+                log.warning("대기: %s", e)
+                last_error = str(e)
         if a.once:
             return 0
         time.sleep(TICK)

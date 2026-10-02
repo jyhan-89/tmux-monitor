@@ -96,6 +96,42 @@ if [[ $MODE == https ]]; then
   fi
 fi
 
+if [[ $WITH_ORCH == 1 ]]; then
+  setup_company
+  if [[ $WITH_SERVICE == 1 ]]; then
+    OLABEL="kr.tmuxweb.orchestrator"
+    OPLIST="$HOME/Library/LaunchAgents/$OLABEL.plist"
+    cat > "$OPLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$OLABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$APP_DIR/.venv/bin/python</string>
+    <string>orchestrator.py</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key><string>$APP_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$BREW/bin:$BREW/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PORT</key><string>$PORT</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/tmux-web-orchestrator.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tmux-web-orchestrator.log</string>
+</dict>
+</plist>
+PLIST
+    launchctl bootout "gui/$(id -u)/$OLABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$OPLIST"
+    ok "오케스트레이터 실행 (로그: ~/Library/Logs/tmux-web-orchestrator.log)"
+  fi
+fi
+
 if [[ $WITH_PERSIST == 1 ]]; then
   step "tmux-persist (세션 자동 저장, 로그인 후 복원)"
   PD="$APP_DIR/addons/tmux-persist"

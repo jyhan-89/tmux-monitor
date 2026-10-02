@@ -86,4 +86,17 @@ if [[ $WITH_PERSIST == 1 ]]; then
   ok "5분마다 자동 저장, 로그인(부팅) 시 자동 복원, 웹 화면 💾 에서 저장/복원"
 fi
 
+if [[ $WITH_ORCH == 1 ]]; then
+  setup_company
+  if [[ $WITH_SERVICE == 1 ]]; then
+    unit_dir="$HOME/.config/systemd/user"
+    sed -e "s#%h/dev_monitor#$APP_DIR#g" "$APP_DIR/deploy/tmux-web-orchestrator.service" > "$unit_dir/tmux-web-orchestrator.service"
+    sed -i "/^\[Service\]/a Environment=PORT=$PORT" "$unit_dir/tmux-web-orchestrator.service"
+    systemctl --user daemon-reload
+    systemctl --user enable tmux-web-orchestrator >/dev/null 2>&1
+    systemctl --user restart tmux-web-orchestrator
+    ok "오케스트레이터 실행 (systemctl --user status tmux-web-orchestrator)"
+  fi
+fi
+
 summary "$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(172\.17\.|192\.168\.122\.)|:' | xargs)"

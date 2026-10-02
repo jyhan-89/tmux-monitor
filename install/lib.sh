@@ -8,6 +8,7 @@ ASSUME_YES=0
 MODE=lan
 WITH_SERVICE=1
 WITH_PERSIST=0
+WITH_ORCH=0
 
 if [[ -t 1 ]]; then
   C_B=$'\e[1m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'
@@ -40,6 +41,7 @@ usage() {
   -y, --yes        모든 질문에 '예'로 진행 (계정 만들기는 제외)
   --no-service     상시 실행(자동 시작) 등록 생략
   --with-persist   tmux-persist 함께 설치 (세션 5분마다 자동 저장, 재부팅·로그인 후 복원, 웹에서 저장/복원)
+  --with-orchestrator  조직·프로세스 정의에 따라 Claude 세션을 자동 운영하는 오케스트레이터 함께 설치
   -h, --help       도움말
 EOF
 }
@@ -52,6 +54,7 @@ parse_args() {
       --local) MODE=local ;;
       --no-service) WITH_SERVICE=0 ;;
       --with-persist) WITH_PERSIST=1 ;;
+      --with-orchestrator) WITH_ORCH=1 ;;
       -h|--help) usage; exit 0 ;;
       *) usage; die "알 수 없는 옵션: $1" ;;
     esac
@@ -81,6 +84,30 @@ setup_venv() {
   "$APP_DIR/.venv/bin/python" -m pip install -q --upgrade pip
   "$APP_DIR/.venv/bin/python" -m pip install -q -r "$APP_DIR/requirements.txt"
   ok "패키지 설치 완료"
+}
+
+copy_missing() {
+  local src="$1" dst="$2" rel
+  (cd "$src" && find . -type f) | while IFS= read -r rel; do
+    if [[ ! -e "$dst/$rel" ]]; then
+      mkdir -p "$(dirname "$dst/$rel")"
+      cp "$src/$rel" "$dst/$rel"
+    fi
+  done
+}
+
+setup_company() {
+  step "오케스트레이터 준비 ($CONFIG_DIR/company)"
+  local company="$CONFIG_DIR/company"
+  mkdir -p "$company/prompts" "$company/examples"
+  copy_missing "$APP_DIR/company/prompts" "$company/prompts"
+  copy_missing "$APP_DIR/company/examples" "$company/examples"
+  TMUX_WEB_CONFIG="$CONFIG_DIR" "$APP_DIR/.venv/bin/python" -c 'import tokens; tokens.ensure_token("orchestrator"); tokens.ensure_token("hook")'
+  ok "역할 프롬프트·예시 정의 복사, 오케스트레이터·훅 토큰 준비"
+  if [[ ! -f "$company/org.yaml" ]]; then
+    info "조직 정의가 아직 없습니다. 예시로 시작하려면:"
+    info "  cp $company/examples/mw-minimal/*.yaml $company/   (org.yaml의 repo를 실제 저장소 경로로 바꾸세요)"
+  fi
 }
 
 setup_account() {

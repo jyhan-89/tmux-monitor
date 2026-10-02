@@ -1,0 +1,12 @@
+[Unit]
+Description=tmux web monitor orchestrator
+After=tmux-web.service
+
+[Service]
+WorkingDirectory=%h/dev_monitor
+ExecStart=%h/dev_monitor/.venv/bin/python orchestrator.py run
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
