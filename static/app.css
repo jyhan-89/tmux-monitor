@@ -182,6 +182,16 @@ dialog textarea { font:13px ui-monospace, monospace; resize:vertical; }
 #layoutlink { margin-top:8px; }
 #layoutlink b { color:var(--ok); }
 #layoutlink button { margin-left:6px; padding:2px 8px; font-size:12px; }
+#layoutchip { flex:none; display:flex; align-items:center; gap:5px; max-width:180px; padding:3px 9px; font-size:12px; border-color:rgba(76,195,138,.55); color:var(--fg); }
+#layoutchip .lcname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+#layoutchip .lcdot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--dim); }
+#layoutchip .lcdot.saved { background:var(--ok); }
+#layoutchip .lcdot.pending { background:var(--warn); }
+#layoutchip .lcdot.error { background:var(--err); }
+#layoutchip.none { border-color:var(--line); color:var(--dim); }
+#layoutchip.none .lcname { font-weight:normal; }
+#layoutchip.none .lcdot { display:none; }
+@media (max-width:768px) { #layoutchip { max-width:90px; } #layoutchip .lcicon { display:none; } }
 .desk.add.linked { color:var(--ok); border-color:rgba(76,195,138,.5); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #persistdlg .actions { margin:10px 0; }
 #persistlist { list-style:none; margin:0; padding:0; max-height:min(55dvh, 460px); overflow:auto; border:1px solid var(--line); border-radius:6px; }

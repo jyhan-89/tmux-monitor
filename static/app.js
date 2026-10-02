@@ -874,6 +874,7 @@ let layoutLink = LS.get('layoutLink', null);
 let linkTimer = null;
 let linkSent = '';
 let linkSavedAt = null;
+let linkState = 'saved';
 
 function layoutBody() {
   return { desks: desks.map((d) => ({ name: d.name, tree: d.tree, active: d.active })), deskIdx };
@@ -886,14 +887,35 @@ function setLink(name) {
   linkTimer = null;
   linkSent = name ? JSON.stringify(layoutBody()) : '';
   linkSavedAt = name ? Date.now() : null;
+  linkState = 'saved';
   renderDesks();
   renderLinkStatus();
+}
+
+function renderLayoutChip() {
+  const chip = $('layoutchip');
+  const label = { saved: '저장됨', pending: '저장 대기 중', error: '저장 실패' }[linkState];
+  chip.classList.toggle('none', !layoutLink);
+  chip.querySelector('.lcname').textContent = layoutLink || '구성 없음';
+  chip.querySelector('.lcdot').className = `lcdot ${layoutLink ? linkState : ''}`;
+  chip.title = layoutLink
+    ? `불러온 데스크탑 구성: ${layoutLink} · ${label}${linkSavedAt ? ` (마지막 저장 ${new Date(linkSavedAt).toLocaleTimeString('ko-KR')})` : ''} · 변경 사항 자동 저장`
+    : '연결된 데스크탑 구성이 없습니다 (자동 저장 안 됨) · 눌러서 저장/불러오기';
+  document.title = layoutLink ? `tmux 모니터 · ${layoutLink}` : 'tmux 모니터';
 }
 
 function scheduleAutoSave() {
   if (!layoutLink) return;
   clearTimeout(linkTimer);
+  if (JSON.stringify(layoutBody()) === linkSent) {
+    linkTimer = null;
+    return;
+  }
   linkTimer = setTimeout(autoSaveNow, 1500);
+  if (linkState !== 'pending') {
+    linkState = 'pending';
+    renderLayoutChip();
+  }
 }
 
 async function autoSaveNow() {
@@ -906,7 +928,9 @@ async function autoSaveNow() {
     await api('PUT', `/layouts/${enc(layoutLink)}`, body);
     linkSent = json;
     linkSavedAt = Date.now();
+    linkState = 'saved';
   } catch (e) {
+    linkState = 'error';
     toast(`'${layoutLink}' 자동 저장 실패: ${e.message}`, 5000);
   }
   renderDesks();
@@ -1010,6 +1034,7 @@ async function loadLayout(name) {
   toast(`${msg} · 이후 변경은 자동 저장`, 5000);
 }
 
+$('layoutchip').onclick = openLayouts;
 $('layoutunlink').onclick = () => {
   setLink(null);
   toast('연결을 끊었습니다 · 더 이상 자동 저장하지 않습니다');
@@ -1075,11 +1100,9 @@ function renderDesks() {
   box.appendChild(add);
   const more = document.createElement('button');
   more.className = 'desk add';
-  more.textContent = layoutLink ? `⋯ ${layoutLink}` : '⋯';
-  more.classList.toggle('linked', !!layoutLink);
-  more.title = layoutLink
-    ? `'${layoutLink}' 구성에 연결됨 · 변경 사항 자동 저장${linkSavedAt ? ` (마지막 저장 ${new Date(linkSavedAt).toLocaleTimeString('ko-KR')})` : ''}`
-    : '데스크탑 구성 저장/불러오기';
+  more.textContent = '⋯';
+  more.title = '데스크탑 구성 저장/불러오기';
+  renderLayoutChip();
   more.onclick = openLayouts;
   box.appendChild(more);
 }
@@ -3085,7 +3108,9 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
     clearTimeout(linkTimer);
     linkTimer = null;
     linkSent = JSON.stringify(layoutBody());
+    linkState = 'saved';
   }
+  renderLayoutChip();
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);
