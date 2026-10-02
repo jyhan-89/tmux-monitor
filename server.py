@@ -517,7 +517,7 @@ def api_files_read(path: str):
         "binary": False,
         "truncated": truncated,
         "text": text,
-        "mtime": st.st_mtime_ns,
+        "mtime": str(st.st_mtime_ns),
         "encoding": encoding,
         "newline": "\r\n" if b"\r\n" in data else "\n",
         "editable": file_edit_enabled() and not truncated and encoding is not None and os.access(f, os.W_OK),
@@ -527,7 +527,7 @@ def api_files_read(path: str):
 class FileWrite(BaseModel):
     path: str
     text: str
-    mtime: int | None = None
+    mtime: str | None = None
     encoding: str = "utf-8"
     newline: str = "\n"
 
@@ -541,7 +541,7 @@ def api_files_write(body: FileWrite):
         raise HTTPException(400, "파일이 아닙니다")
     if body.encoding not in ("utf-8", "cp949") or body.newline not in ("\n", "\r\n"):
         raise HTTPException(400, "지원하지 않는 인코딩/줄바꿈입니다")
-    if body.mtime is not None and f.stat().st_mtime_ns != body.mtime:
+    if body.mtime is not None and str(f.stat().st_mtime_ns) != str(body.mtime):
         raise HTTPException(409, "다른 곳에서 파일이 바뀌었습니다")
     text = body.text.replace("\r\n", "\n")
     if body.newline == "\r\n":
@@ -570,7 +570,7 @@ def api_files_write(body: FileWrite):
     finally:
         if fd is not None and os.path.exists(tmp):
             os.unlink(tmp)
-    return {"mtime": f.stat().st_mtime_ns, "size": len(data)}
+    return {"mtime": str(f.stat().st_mtime_ns), "size": len(data)}
 
 
 def require_file_edit() -> None:

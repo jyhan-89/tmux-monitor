@@ -29,7 +29,13 @@ let imeOn = true;
 let ctrlArmed = false;
 let config = { snippets: [] };
 
-const active = () => conns.get(activeName) || null;
+const docs = new Map();
+let lastTerm = null;
+const isDocKey = (k) => typeof k === 'string' && k.startsWith('f:');
+const docKey = (p) => `f:${p}`;
+const viewOf = (k) => conns.get(k) || docs.get(k) || null;
+const hasView = (k) => conns.has(k) || docs.has(k);
+const active = () => conns.get(activeName) || conns.get(lastTerm) || null;
 
 let toastTimer;
 function toast(msg, ms = 2500) {
@@ -235,7 +241,6 @@ function sessionItem(s, inGroup) {
 }
 
 function openFilesAt(path) {
-  if (!confirmLeave()) return;
   $('files').hidden = false;
   setDrawer(false);
   fb.session = activeName;
@@ -546,7 +551,7 @@ async function killSession(name) {
 }
 
 function saveTabs() {
-  LS.set('openTabs', [...conns.keys()]);
+  LS.set('openTabs', [...conns.keys(), ...docs.keys()]);
   LS.set('activeTab', activeName);
   LS.set('layout', tree);
 }
@@ -718,6 +723,7 @@ function checkConnections() {
 }
 
 function closeSession(name) {
+  if (isDocKey(name)) return closeDoc(name);
   const conn = conns.get(name);
   if (!conn) return;
   conn.closed = true;
@@ -737,13 +743,14 @@ function closeSession(name) {
 }
 
 function activate(name, focus = true) {
-  if (!conns.has(name)) return;
+  if (!hasView(name)) return;
+  if (conns.has(name)) lastTerm = name;
   const changed = activeName !== name;
   if (!groupOf(name)) addToGroup(name, groupOf(activeName) || leaves()[0]);
   groupOf(name).active = name;
   activeName = name;
   layout();
-  if (focus) focusInput();
+  if (focus && !isDocKey(name)) focusInput();
   if (changed) {
     renderList();
     saveTabs();
@@ -844,7 +851,7 @@ function sanitizeTree(n) {
     if (!x || typeof x !== 'object') return null;
     if (x.t === 'leaf') {
       const names = (Array.isArray(x.tabs) ? x.tabs : [x.name])
-        .filter((nm) => typeof nm === 'string' && conns.has(nm) && !seen.has(nm));
+        .filter((nm) => typeof nm === 'string' && hasView(nm) && !seen.has(nm));
       names.forEach((nm) => seen.add(nm));
       if (!names.length) return null;
       return group(names, names.includes(x.active) ? x.active : names[0]);
@@ -868,7 +875,10 @@ function sanitizeTree(n) {
 }
 
 function placeSession(name, gid, zone, before = null) {
-  if (!conns.has(name)) conns.set(name, createConn(name));
+  if (!hasView(name)) {
+    if (isDocKey(name)) docs.set(name, createDoc(name.slice(2)));
+    else conns.set(name, createConn(name));
+  }
   const target = gid ? groupById(gid) : null;
   const from = groupOf(name);
   if (!target) {
@@ -924,7 +934,8 @@ function buildGroup(g) {
     t.dataset.name = name;
     t.draggable = true;
     t.innerHTML = '<span class="dot"></span><span class="tname"></span><button class="tclose" title="탭 닫기 (세션은 유지)">×</button>';
-    t.querySelector('.tname').textContent = name;
+    t.querySelector('.tname').textContent = isDocKey(name) ? baseName(name) : name;
+    if (isDocKey(name)) t.classList.add('doc');
     t.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData(SESSION_MIME, name);
       e.dataTransfer.setData('text/plain', name);
@@ -941,14 +952,14 @@ function buildGroup(g) {
     strip.appendChild(t);
   }
   w.appendChild(strip);
-  w.appendChild(conns.get(g.active).el);
+  w.appendChild(viewOf(g.active).el);
   return w;
 }
 
 function buildSingle(name) {
   const w = document.createElement('div');
   w.className = 'leaf';
-  w.appendChild(conns.get(name).el);
+  w.appendChild(viewOf(name).el);
   return w;
 }
 
@@ -997,12 +1008,12 @@ function visibleNames() {
 
 function layout() {
   for (const g of leaves()) {
-    g.tabs = g.tabs.filter((n) => conns.has(n));
+    g.tabs = g.tabs.filter((n) => hasView(n));
     if (!g.tabs.includes(g.active)) g.active = g.tabs[0] || null;
   }
   tree = prune(tree);
-  if (activeName && !conns.has(activeName)) activeName = null;
-  for (const name of conns.keys()) {
+  if (activeName && !hasView(activeName)) activeName = null;
+  for (const name of [...conns.keys(), ...docs.keys()]) {
     if (!groupOf(name)) addToGroup(name, groupOf(activeName) || leaves()[0], null, false);
   }
   if (!activeName) activeName = leaves()[0]?.active || null;
@@ -1011,7 +1022,7 @@ function layout() {
   if (key !== layoutKey || !term.querySelector('.lroot')) {
     layoutKey = key;
     const hold = $('paneholder');
-    for (const c of conns.values()) hold.appendChild(c.el);
+    for (const v of [...conns.values(), ...docs.values()]) hold.appendChild(v.el);
     term.querySelector('.lroot')?.remove();
     const names = visibleNames();
     if (names.length) {
@@ -1029,11 +1040,12 @@ function layout() {
       }
     });
   }
-  $('empty').hidden = conns.size > 0;
+  $('empty').hidden = conns.size + docs.size > 0;
   const focusGid = groupOf(activeName)?.gid;
   for (const w of term.querySelectorAll('.leaf')) w.classList.toggle('focus', !!focusGid && w.dataset.gid === focusGid);
   for (const name of visibleNames()) {
     const c = conns.get(name);
+    if (!c) continue;
     ensureOpen(c);
     fitConn(c);
   }
@@ -1045,25 +1057,34 @@ function renderTabs() {
   const box = $('tabs');
   box.innerHTML = '';
   for (const t of document.querySelectorAll('.gtab')) {
-    const s = sessions.find((x) => x.name === t.dataset.name);
-    const c = conns.get(t.dataset.name);
+    const key = t.dataset.name;
+    const d = docs.get(key);
+    if (d) {
+      t.querySelector('.tname').textContent = `${d.dirty ? '● ' : ''}${d.name}`;
+      t.title = d.path;
+      continue;
+    }
+    const s = sessions.find((x) => x.name === key);
+    const c = conns.get(key);
     t.querySelector('.dot').className = `dot${s?.state ? ` st-${s.state}` : ''}`;
     t.classList.toggle('offline', !(c?.ws && c.ws.readyState === WebSocket.OPEN));
-    t.title = s?.state ? `${t.dataset.name} · ${STATE_LABEL[s.state]}` : t.dataset.name;
+    t.title = s?.state ? `${key} · ${STATE_LABEL[s.state]}` : key;
   }
   if (!narrow.matches) return;
-  for (const c of conns.values()) {
-    const s = sessions.find((x) => x.name === c.name);
+  for (const key of [...conns.keys(), ...docs.keys()]) {
+    const c = conns.get(key);
+    const d = docs.get(key);
+    const s = c && sessions.find((x) => x.name === key);
     const tab = document.createElement('div');
-    tab.className = 'tab';
-    tab.classList.toggle('active', c.name === activeName);
-    tab.classList.toggle('offline', !(c.ws && c.ws.readyState === WebSocket.OPEN));
-    tab.innerHTML = '<span class="dot"></span><span class="tname"></span><button class="tclose" title="탭 닫기 (세션은 유지)">×</button>';
+    tab.className = `tab${d ? ' doc' : ''}`;
+    tab.classList.toggle('active', key === activeName);
+    tab.classList.toggle('offline', !!c && !(c.ws && c.ws.readyState === WebSocket.OPEN));
+    tab.innerHTML = '<span class="dot"></span><span class="tname"></span><button class="tclose" title="탭 닫기">×</button>';
     if (s?.state) tab.querySelector('.dot').classList.add(`st-${s.state}`);
-    tab.querySelector('.tname').textContent = c.name;
-    tab.title = s?.state ? `${c.name} · ${STATE_LABEL[s.state]}` : c.name;
-    tab.onclick = () => activate(c.name);
-    tab.querySelector('.tclose').onclick = (e) => { e.stopPropagation(); closeSession(c.name); };
+    tab.querySelector('.tname').textContent = d ? `${d.dirty ? '● ' : ''}${d.name}` : key;
+    tab.title = d ? d.path : s?.state ? `${key} · ${STATE_LABEL[s.state]}` : key;
+    tab.onclick = () => activate(key);
+    tab.querySelector('.tclose').onclick = (e) => { e.stopPropagation(); closeSession(key); };
     box.appendChild(tab);
   }
   box.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -1703,10 +1724,7 @@ function loadViewerLibs() {
   return viewerLibs;
 }
 
-const fb = {
-  path: null, root: '', session: null, file: null, text: '', truncated: false, rawMd: false,
-  meta: null, editing: false, dirty: false,
-};
+const fb = { path: null, root: '', session: null, fileEdit: false };
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
 const MD_EXT = /\.(md|markdown|mdx)$/i;
 const LANG_BY_EXT = {
@@ -1734,23 +1752,16 @@ function fmtSize(n) {
   return `${(n / 1048576).toFixed(1)} MB`;
 }
 
-function fileMsg(text, append = false) {
+function fileMsg(text, append = false, target = $('fbody')) {
   const d = document.createElement('div');
   d.className = 'fmsg';
   d.textContent = text;
-  if (!append) $('fbody').innerHTML = '';
-  $('fbody').appendChild(d);
-}
-
-function confirmLeave() {
-  if (fb.editing && fb.dirty && !confirm('저장하지 않은 변경 사항이 있습니다. 버리고 나갈까요?')) return false;
-  fb.editing = false;
-  fb.dirty = false;
-  return true;
+  if (!append) target.innerHTML = '';
+  target.appendChild(d);
 }
 
 function closeFiles() {
-  if (confirmLeave()) $('files').hidden = true;
+  $('files').hidden = true;
 }
 
 function toggleFiles() {
@@ -1758,19 +1769,19 @@ function toggleFiles() {
   if (!panel.hidden) return closeFiles();
   panel.hidden = false;
   setDrawer(false);
-  if (!fb.path || fb.session !== activeName) {
-    fb.session = activeName;
-    listDir(sessions.find((s) => s.name === activeName)?.path || null);
+  const term = active()?.name;
+  if (!fb.path || fb.session !== term) {
+    fb.session = term;
+    listDir(sessions.find((s) => s.name === term)?.path || null);
   }
 }
 
 async function listDir(path) {
-  if (!confirmLeave()) return;
   let r;
   try {
     r = await api('GET', `/files/list${path ? `?path=${enc(path)}` : ''}`);
   } catch (e) {
-    if (fb.path && !fb.file) return toast(e.message, 4000);
+    if (fb.path) return toast(e.message, 4000);
     if (path) {
       toast(e.message, 4000);
       return listDir(null);
@@ -1780,12 +1791,8 @@ async function listDir(path) {
   const samePath = fb.path === r.path;
   fb.path = r.path;
   fb.root = r.root;
-  fb.file = null;
   fb.fileEdit = r.file_edit;
-  $('fmenu').hidden = false;
-  $('fback').hidden = true;
-  $('ftools').hidden = true;
-  renderCrumb(r.path, false);
+  renderCrumb(r.path);
   const ul = document.createElement('ul');
   ul.className = 'flist';
   if (!samePath) clearSel();
@@ -1818,7 +1825,7 @@ function updateSel() {
     row.li.classList.toggle('selected', on);
     row.box.checked = on;
   }
-  $('fselbar').hidden = !selecting() || !!fb.file;
+  $('fselbar').hidden = !selecting();
   $('fselcount').textContent = `${n}개 선택`;
   const off = !fb.fileEdit;
   for (const act of ['copy', 'cut', 'delete']) {
@@ -1880,7 +1887,7 @@ function fileRow(e, full) {
     }
     if (ev.shiftKey && sel.last !== null) return rangeSel(idx);
     if (ev.ctrlKey || ev.metaKey || selecting()) return toggleSel(idx);
-    if (e.dir) listDir(full); else openFile(full);
+    if (e.dir) listDir(full); else openFileTab(full);
   };
   box.onclick = (ev) => {
     ev.stopPropagation();
@@ -1976,7 +1983,7 @@ function clipLabel() {
 function entryMenu(e, full, idx) {
   const off = editOff();
   const items = [
-    { label: '열기', run: () => (e.dir ? listDir(full) : openFile(full)) },
+    { label: '열기', run: () => (e.dir ? listDir(full) : openFileTab(full)) },
     {
       label: '선택',
       run: () => {
@@ -2119,8 +2126,7 @@ async function newEntry(kind) {
     return toast(e.message, 5000);
   }
   if (kind === 'dir') return listDir(fb.path);
-  await openFile(r.path);
-  startEdit();
+  openFileTab(r.path, { edit: true });
 }
 
 function downloadFile(path) {
@@ -2136,7 +2142,7 @@ document.addEventListener('mousedown', (e) => { if (!e.target.closest('#ctxmenu'
 document.addEventListener('touchstart', (e) => { if (!e.target.closest('#ctxmenu')) closeCtx(); }, { capture: true, passive: true });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('ctxmenu').hidden) return closeCtx();
-  if ($('files').hidden || fb.file || !fb.path) return;
+  if ($('files').hidden || !fb.path) return;
   if (e.target.closest('input, textarea, select, [contenteditable], .xterm, dialog')) return;
   const mod = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
@@ -2171,19 +2177,6 @@ for (const b of document.querySelectorAll('#fselbar [data-act]')) {
 window.addEventListener('resize', closeCtx);
 $('fbody').addEventListener('scroll', closeCtx);
 $('fbody').addEventListener('contextmenu', (e) => {
-  if (fb.editing) return;
-  if (fb.file) {
-    e.preventDefault();
-    const sel = window.getSelection().toString();
-    openCtx(e.clientX, e.clientY, [
-      { label: sel ? `선택 영역 복사 (${sel.length}자)` : '선택 영역 복사', disabled: !sel, run: () => copyToast(sel) },
-      { label: '파일 전체 복사', disabled: !fb.text, run: () => copyToast(fb.text) },
-      { label: '경로 복사', run: () => copyToast(fb.file, '경로를 복사했습니다') },
-      '-',
-      { label: '입력창에 경로 넣기', run: () => insertPath(fb.file) },
-    ]);
-    return;
-  }
   if (!fb.path) return;
   e.preventDefault();
   openCtx(e.clientX, e.clientY, folderMenu());
@@ -2193,21 +2186,12 @@ function copyToast(text, msg) {
   return copyText(text).then((ok) => toast(ok ? msg || `복사했습니다 (${text.length}자)` : '복사 실패', 1200));
 }
 
-$('fbody').addEventListener('mouseup', (e) => {
-  if (e.button !== 0 || !fb.file || fb.editing) return;
-  setTimeout(() => {
-    const sel = window.getSelection();
-    const text = sel.toString();
-    if (!text.trim() || !$('fbody').contains(sel.anchorNode)) return;
-    copyToast(text);
-  }, 0);
-});
 $('fmenu').onclick = () => {
   const r = $('fmenu').getBoundingClientRect();
   openCtx(r.right, r.bottom, folderMenu());
 };
 
-function renderCrumb(path, isFile) {
+function renderCrumb(path) {
   const box = $('fcrumb');
   box.innerHTML = '';
   const add = (label, target) => {
@@ -2218,7 +2202,7 @@ function renderCrumb(path, isFile) {
   };
   const rel = path === fb.root ? '' : path.slice(fb.root.length + 1);
   const parts = rel ? rel.split('/') : [];
-  add('~', parts.length || isFile ? fb.root : null);
+  add('~', parts.length ? fb.root : null);
   let acc = fb.root;
   parts.forEach((p, i) => {
     const sep = document.createElement('span');
@@ -2231,56 +2215,134 @@ function renderCrumb(path, isFile) {
   box.scrollLeft = box.scrollWidth;
 }
 
-async function openFile(path) {
-  if (!confirmLeave()) return;
-  const name = path.split('/').pop();
-  fb.file = path;
-  fb.rawMd = false;
-  fb.meta = null;
-  setEditUI(false);
-  updateSel();
-  renderCrumb(path, true);
-  $('fback').hidden = false;
-  $('fmenu').hidden = true;
-  $('ftools').hidden = false;
-  $('fname').textContent = name;
-  $('fdownload').href = rawUrl(path, true);
-  $('fmdtoggle').hidden = !MD_EXT.test(name);
-  if (IMG_EXT.test(name)) {
-    const d = document.createElement('div');
-    d.className = 'fimg';
-    const img = new Image();
-    img.src = rawUrl(path);
-    img.alt = name;
-    d.appendChild(img);
-    $('fbody').innerHTML = '';
-    $('fbody').appendChild(d);
-    return;
-  }
-  fileMsg('불러오는 중…');
-  let r;
-  try {
-    [r] = await Promise.all([api('GET', `/files/read?path=${enc(path)}`), loadViewerLibs().catch(() => null)]);
-  } catch (e) {
-    return fileMsg(e.message);
-  }
-  if (fb.file !== path) return;
-  if (r.binary) return fileMsg(`바이너리 파일입니다 (${fmtSize(r.size)}). 내려받기로 확인하세요.`);
-  fb.text = r.text;
-  fb.truncated = r.truncated;
-  fb.meta = r;
-  renderFile();
+function openFileTab(path, { edit = false } = {}) {
+  const key = docKey(path);
+  if (!docs.has(key)) docs.set(key, createDoc(path));
+  const d = docs.get(key);
+  activate(key);
+  saveTabs();
+  if (narrow.matches) $('files').hidden = true;
+  if (edit) d.ready.then(() => startEdit(d));
+  return d;
 }
 
-function setEditUI(on) {
-  const name = fb.file ? fb.file.split('/').pop() : '';
-  $('fedit').hidden = on || !fb.meta?.editable;
-  $('fsave').hidden = !on;
-  $('fcancel').hidden = !on;
-  $('fmdtoggle').hidden = on || !MD_EXT.test(name);
-  $('finsert').hidden = on;
-  $('fbody').classList.toggle('editing', on);
-  $('fname').textContent = (on && fb.dirty ? '● ' : '') + name;
+function createDoc(path) {
+  const key = docKey(path);
+  const el = document.createElement('div');
+  el.className = 'pane docpane';
+  el.dataset.name = key;
+  el.innerHTML = `<div class="dtools"><span class="dname"></span>
+    <button data-a="md" hidden>원문</button>
+    <button data-a="edit" hidden>수정</button>
+    <button data-a="save" class="primary" hidden title="저장 (Ctrl+S)">저장</button>
+    <button data-a="cancel" hidden>취소</button>
+    <button data-a="reload" title="다시 불러오기">↻</button>
+    <button data-a="insert" title="입력창에 경로 넣기">경로 넣기</button>
+    <a class="btn" data-a="download" download>내려받기</a></div><div class="dbody"></div>`;
+  const d = {
+    key, path, name: baseName(path), el,
+    body: el.querySelector('.dbody'),
+    btn: (a) => el.querySelector(`[data-a="${a}"]`),
+    text: '', meta: null, truncated: false, rawMd: false, editing: false, dirty: false,
+  };
+  d.el.querySelector('.dname').textContent = d.name;
+  d.el.querySelector('.dname').title = path;
+  d.btn('download').href = rawUrl(path, true);
+  d.btn('md').onclick = () => {
+    d.rawMd = !d.rawMd;
+    renderDoc(d);
+  };
+  d.btn('edit').onclick = () => startEdit(d);
+  d.btn('save').onclick = () => saveFile(d, false);
+  d.btn('cancel').onclick = () => cancelEdit(d);
+  d.btn('reload').onclick = () => {
+    if (d.editing && d.dirty && !confirm('저장하지 않은 변경 사항이 있습니다. 버리고 다시 불러올까요?')) return;
+    d.ready = loadDoc(d);
+  };
+  d.btn('insert').onclick = () => insertPath(path);
+  el.addEventListener('mousedown', () => { if (activeName !== key) activate(key, false); });
+  d.body.addEventListener('mouseup', (e) => {
+    if (e.button !== 0 || d.editing) return;
+    setTimeout(() => {
+      const s = window.getSelection();
+      const text = s.toString();
+      if (!text.trim() || !d.body.contains(s.anchorNode)) return;
+      copyToast(text);
+    }, 0);
+  });
+  d.body.addEventListener('contextmenu', (e) => {
+    if (d.editing) return;
+    e.preventDefault();
+    const s = window.getSelection().toString();
+    openCtx(e.clientX, e.clientY, [
+      { label: s ? `선택 영역 복사 (${s.length}자)` : '선택 영역 복사', disabled: !s, run: () => copyToast(s) },
+      { label: '파일 전체 복사', disabled: !d.text, run: () => copyToast(d.text) },
+      { label: '경로 복사', run: () => copyToast(path, '경로를 복사했습니다') },
+      '-',
+      { label: '입력창에 경로 넣기', run: () => insertPath(path) },
+      { label: '파일 탐색에서 열기', run: () => openFilesAt(path.slice(0, path.lastIndexOf('/'))) },
+    ]);
+  });
+  d.ready = loadDoc(d);
+  return d;
+}
+
+function closeDoc(key) {
+  const d = docs.get(key);
+  if (!d) return;
+  if (d.editing && d.dirty && !confirm(`'${d.name}'의 저장하지 않은 변경 사항을 버리고 닫을까요?`)) return;
+  d.el.remove();
+  docs.delete(key);
+  const g = groupOf(key);
+  removeFromGroups(key);
+  if (activeName === key) {
+    activeName = (g && groupById(g.gid)?.active) || leaves()[0]?.active || lastTerm || null;
+  }
+  layout();
+  saveTabs();
+}
+
+async function loadDoc(d) {
+  d.meta = null;
+  d.editing = false;
+  d.dirty = false;
+  setDocUI(d, false);
+  if (IMG_EXT.test(d.name)) {
+    const box = document.createElement('div');
+    box.className = 'fimg';
+    const img = new Image();
+    img.src = `${rawUrl(d.path)}&t=${Date.now()}`;
+    img.alt = d.name;
+    box.appendChild(img);
+    d.body.innerHTML = '';
+    d.body.appendChild(box);
+    return;
+  }
+  fileMsg('불러오는 중…', false, d.body);
+  let r;
+  try {
+    [r] = await Promise.all([api('GET', `/files/read?path=${enc(d.path)}`), loadViewerLibs().catch(() => null)]);
+  } catch (e) {
+    return fileMsg(e.message, false, d.body);
+  }
+  if (r.binary) return fileMsg(`바이너리 파일입니다 (${fmtSize(r.size)}). 내려받기로 확인하세요.`, false, d.body);
+  d.text = r.text;
+  d.truncated = r.truncated;
+  d.meta = r;
+  renderDoc(d);
+}
+
+function setDocUI(d, on) {
+  d.btn('edit').hidden = on || !d.meta?.editable;
+  d.btn('save').hidden = !on;
+  d.btn('cancel').hidden = !on;
+  d.btn('md').hidden = on || !MD_EXT.test(d.name);
+  d.btn('md').textContent = d.rawMd ? '문서 보기' : '원문';
+  d.btn('insert').hidden = on;
+  d.btn('reload').hidden = on;
+  d.body.classList.toggle('editing', on);
+  d.el.querySelector('.dname').textContent = (on && d.dirty ? '● ' : '') + d.name;
+  renderTabs();
 }
 
 function indentUnit(text, file) {
@@ -2289,104 +2351,102 @@ function indentUnit(text, file) {
   return m ? m[1] : '    ';
 }
 
-function startEdit() {
-  if (!fb.meta?.editable) return;
-  fb.editing = true;
-  fb.dirty = false;
-  const body = $('fbody');
-  body.innerHTML = '';
+function startEdit(d) {
+  if (!d.meta?.editable) return;
+  d.editing = true;
+  d.dirty = false;
+  d.body.innerHTML = '';
   const ta = document.createElement('textarea');
-  ta.id = 'feditor';
-  ta.value = fb.text;
+  ta.className = 'deditor';
+  ta.value = d.text;
   ta.spellcheck = false;
   ta.setAttribute('autocapitalize', 'off');
   ta.setAttribute('autocomplete', 'off');
   ta.setAttribute('autocorrect', 'off');
   ta.wrap = 'off';
-  const indent = indentUnit(fb.text, fb.file);
+  const indent = indentUnit(d.text, d.path);
   ta.addEventListener('input', () => {
-    if (!fb.dirty) {
-      fb.dirty = true;
-      setEditUI(true);
+    if (!d.dirty) {
+      d.dirty = true;
+      setDocUI(d, true);
     }
   });
   ta.addEventListener('keydown', (e) => {
     if (e.isComposing || e.keyCode === 229) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
-      saveFile(true);
+      saveFile(d, true);
     } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
       ta.setRangeText(indent, ta.selectionStart, ta.selectionEnd, 'end');
       ta.dispatchEvent(new Event('input'));
     }
   });
-  body.appendChild(ta);
-  setEditUI(true);
+  d.body.appendChild(ta);
+  d.ta = ta;
+  setDocUI(d, true);
   ta.focus();
   ta.setSelectionRange(0, 0);
   ta.scrollTop = 0;
 }
 
-async function saveFile(stay = false, force = false) {
-  const ta = $('feditor');
-  if (!ta || !fb.editing) return;
-  $('fsave').disabled = true;
+async function saveFile(d, stay = false, force = false) {
+  const ta = d.ta;
+  if (!ta || !d.editing) return;
+  d.btn('save').disabled = true;
   let r;
   try {
     r = await api('PUT', '/files/write', {
-      path: fb.file,
+      path: d.path,
       text: ta.value,
-      mtime: force ? null : fb.meta.mtime,
-      encoding: fb.meta.encoding,
-      newline: fb.meta.newline,
+      mtime: force ? null : d.meta.mtime,
+      encoding: d.meta.encoding,
+      newline: d.meta.newline,
     });
   } catch (e) {
     if (e.status === 409 && confirm('다른 곳(터미널 등)에서 파일이 바뀌었습니다. 지금 편집한 내용으로 덮어쓸까요?')) {
-      $('fsave').disabled = false;
-      return saveFile(stay, true);
+      d.btn('save').disabled = false;
+      return saveFile(d, stay, true);
     }
     toast(`저장 실패: ${e.message}`, 5000);
     return;
   } finally {
-    $('fsave').disabled = false;
+    d.btn('save').disabled = false;
   }
-  fb.text = ta.value;
-  fb.meta.mtime = r.mtime;
-  fb.dirty = false;
+  d.text = ta.value;
+  d.meta.mtime = r.mtime;
+  d.dirty = false;
   toast('저장했습니다');
   if (stay) {
-    setEditUI(true);
+    setDocUI(d, true);
   } else {
-    fb.editing = false;
-    renderFile();
+    renderDoc(d);
   }
 }
 
-function cancelEdit() {
-  if (!confirmLeave()) return;
-  renderFile();
+function cancelEdit(d) {
+  if (d.dirty && !confirm('저장하지 않은 변경 사항을 버릴까요?')) return;
+  d.dirty = false;
+  renderDoc(d);
 }
 
-function renderFile() {
-  const body = $('fbody');
-  const name = fb.file.split('/').pop();
-  fb.editing = false;
-  setEditUI(false);
-  body.innerHTML = '';
-  if (MD_EXT.test(name) && !fb.rawMd && window.marked && window.DOMPurify) {
+function renderDoc(d) {
+  d.editing = false;
+  d.ta = null;
+  setDocUI(d, false);
+  d.body.innerHTML = '';
+  if (MD_EXT.test(d.name) && !d.rawMd && window.marked && window.DOMPurify) {
     const div = document.createElement('div');
     div.className = 'md';
-    div.innerHTML = DOMPurify.sanitize(marked.parse(fb.text));
-    fixMdLinks(div, fb.file);
+    div.innerHTML = DOMPurify.sanitize(marked.parse(d.text));
+    fixMdLinks(div, d.path);
     if (window.hljs) div.querySelectorAll('pre code').forEach((el) => { try { hljs.highlightElement(el); } catch {} });
-    body.appendChild(div);
+    d.body.appendChild(div);
   } else {
-    body.appendChild(codeView(fb.text, MD_EXT.test(name) ? 'markdown' : langOf(name)));
+    d.body.appendChild(codeView(d.text, MD_EXT.test(d.name) ? 'markdown' : langOf(d.name)));
   }
-  if (fb.truncated) fileMsg('파일이 커서 앞부분 2MB만 표시했습니다', true);
-  $('fmdtoggle').textContent = fb.rawMd ? '문서 보기' : '원문';
-  body.scrollTop = 0;
+  if (d.truncated) fileMsg('파일이 커서 앞부분 2MB만 표시했습니다', true, d.body);
+  d.body.scrollTop = 0;
 }
 
 function codeView(text, lang) {
@@ -2442,7 +2502,7 @@ function fixMdLinks(div, file) {
       a.href = '#';
       a.onclick = (e) => {
         e.preventDefault();
-        if (/\.[^/]+$/.test(target)) openFile(target); else listDir(target);
+        if (/\.[^/]+$/.test(target)) openFileTab(target); else openFilesAt(target);
       };
     } else {
       a.target = '_blank';
@@ -2456,7 +2516,7 @@ function insertPath(p) {
 }
 
 function insertPaths(paths) {
-  const cur = sessions.find((s) => s.name === activeName);
+  const cur = sessions.find((s) => s.name === active()?.name);
   const rels = paths.map((p) => {
     const rel = cur?.path && p.startsWith(`${cur.path}/`) ? p.slice(cur.path.length + 1) : p;
     return /\s/.test(rel) ? `"${rel}"` : rel;
@@ -2472,25 +2532,16 @@ function insertPaths(paths) {
 
 $('filesbtn').onclick = toggleFiles;
 $('fclose').onclick = closeFiles;
-$('fedit').onclick = startEdit;
-$('fsave').onclick = () => saveFile(false);
-$('fcancel').onclick = cancelEdit;
 window.addEventListener('beforeunload', (e) => {
-  if (fb.editing && fb.dirty) {
+  if ([...docs.values()].some((d) => d.editing && d.dirty)) {
     e.preventDefault();
     e.returnValue = '';
   }
 });
-$('fback').onclick = () => listDir(fb.path);
-$('finsert').onclick = () => fb.file && insertPath(fb.file);
-$('fmdtoggle').onclick = () => {
-  fb.rawMd = !fb.rawMd;
-  renderFile();
-};
 $('fshowhidden').checked = !!LS.get('fshowHidden', false);
 $('fshowhidden').onchange = () => {
   LS.set('fshowHidden', $('fshowhidden').checked);
-  if (!fb.file && fb.path) listDir(fb.path);
+  if (fb.path) listDir(fb.path);
 };
 
 function setFontSize(size) {
@@ -2509,6 +2560,10 @@ const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].
 const cellHeight = (c) => c.el.clientHeight / c.term.rows || 16;
 
 termEl.addEventListener('touchstart', (e) => {
+  if (e.target.closest('.docpane')) {
+    touch = null;
+    return;
+  }
   const name = e.target.closest('.pane')?.dataset.name;
   if (name && name !== activeName) activate(name, false);
   const t = e.touches;
@@ -2663,7 +2718,9 @@ $('term').addEventListener('drop', (e) => {
   const name = e.dataTransfer.getData(SESSION_MIME);
   const st = dropState || dropTarget(e);
   hideDropzone();
-  if (name && sessions.some((s) => s.name === name)) placeSession(name, st.target, st.zone, st.before);
+  if (name && (docs.has(name) || isDocKey(name) || sessions.some((s) => s.name === name))) {
+    placeSession(name, st.target, st.zone, st.before);
+  }
 });
 document.addEventListener('dragend', hideDropzone);
 narrow.addEventListener('change', layout);
@@ -2706,7 +2763,7 @@ async function checkVersion() {
 }
 
 $('updatereload').onclick = () => {
-  if (fb.editing && fb.dirty && !confirm('저장하지 않은 파일 변경 사항이 있습니다. 새로고침할까요?')) return;
+  if ([...docs.values()].some((d) => d.editing && d.dirty) && !confirm('저장하지 않은 파일 변경 사항이 있습니다. 새로고침할까요?')) return;
   location.reload();
 };
 $('updateclose').onclick = () => { $('updatebar').hidden = true; };
@@ -2721,11 +2778,13 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
   const exists = (n) => sessions.some((s) => s.name === n);
   for (const name of LS.get('openTabs', [])) {
     if (exists(name) && !conns.has(name)) conns.set(name, createConn(name));
+    else if (isDocKey(name) && !docs.has(name)) docs.set(name, createDoc(name.slice(2)));
   }
   tree = sanitizeTree(LS.get('layout', null));
   const last = LS.get('activeTab', null);
-  activeName = last && conns.has(last) ? last : null;
+  activeName = last && hasView(last) ? last : null;
   layout();
+  lastTerm = conns.has(activeName) ? activeName : leaves().map((g) => g.active).find((k) => conns.has(k)) || [...conns.keys()][0] || null;
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);

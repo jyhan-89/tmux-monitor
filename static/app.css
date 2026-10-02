@@ -85,7 +85,8 @@ main { flex:1; display:flex; flex-direction:column; min-width:0; }
 #winbar .sep { color:var(--line); padding:0 4px; }
 #winbar .lbl { color:var(--dim); flex:none; }
 
-#term { flex:1; min-height:0; padding:4px; position:relative; touch-action:none; display:flex; }
+#term { flex:1; min-height:0; padding:4px; position:relative; display:flex; }
+.pane:not(.docpane) { touch-action:none; }
 #paneholder { display:none; }
 .lroot { flex:1 1 0; min-width:0; min-height:0; display:flex; }
 .lroot > * { flex:1 1 0; }
@@ -196,7 +197,7 @@ dialog.big[open] { display:flex; flex-direction:column; }
 #scrim { display:none; }
 #app.collapsed aside { display:none; }
 
-#files { position:fixed; top:0; right:0; width:min(50vw, 860px); height:var(--app-h, 100dvh); z-index:30; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; box-shadow:-4px 0 24px rgba(0,0,0,.35); padding-top:env(safe-area-inset-top); }
+#files { flex:none; width:320px; min-width:0; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; }
 #files[hidden] { display:none; }
 .fhead { display:flex; gap:6px; align-items:center; padding:8px; border-bottom:1px solid var(--line); }
 #fcrumb { flex:1; min-width:0; display:flex; align-items:center; overflow-x:auto; white-space:nowrap; font-size:13px; scrollbar-width:none; }
@@ -204,14 +205,18 @@ dialog.big[open] { display:flex; flex-direction:column; }
 #fcrumb button:disabled { color:var(--fg); cursor:default; font-weight:600; }
 #fcrumb .sep { color:var(--dim); }
 .fhidden { flex:none; display:flex; align-items:center; gap:4px; font-size:12px; color:var(--dim); cursor:pointer; }
-#ftools { display:flex; gap:6px; align-items:center; padding:6px 8px; border-bottom:1px solid var(--line); }
-#ftools[hidden] { display:none; }
-#fname { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.docpane { display:flex; flex-direction:column; background:var(--bg); }
+.dtools { flex:none; display:flex; gap:6px; align-items:center; padding:5px 8px; border-bottom:1px solid var(--line); overflow-x:auto; scrollbar-width:none; }
+.dtools button, .dtools a.btn { flex:none; padding:3px 9px; font-size:12px; }
+.dname { flex:1; min-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:13px; }
+.dbody { flex:1; min-height:0; overflow:auto; }
+.dbody.editing { overflow:hidden; display:flex; }
+.gtab.doc .dot, .tab.doc .dot { display:none; }
+.gtab.doc .tname::before, .tab.doc .tname::before { content:'📄 '; }
 a.btn { background:#34373d; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 10px; text-decoration:none; font-size:14px; }
 a.btn:hover { border-color:var(--accent); }
 #fbody { flex:1; min-height:0; overflow:auto; }
-#fbody.editing { overflow:hidden; display:flex; }
-#feditor { flex:1; width:100%; margin:0; border:0; resize:none; outline:none; background:var(--bg); color:var(--fg); padding:10px 12px; font:13px/1.55 ui-monospace, "D2Coding", monospace; tab-size:4; white-space:pre; overflow:auto; }
+.deditor { flex:1; width:100%; margin:0; border:0; resize:none; outline:none; background:var(--bg); color:var(--fg); padding:10px 12px; font:13px/1.55 ui-monospace, "D2Coding", monospace; tab-size:4; white-space:pre; overflow:auto; }
 .flist { list-style:none; margin:0; padding:4px; }
 .flist li { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; cursor:pointer; }
 .flist li:hover { background:#2f3237; }
@@ -272,6 +277,6 @@ a.btn:hover { border-color:var(--accent); }
   #ime { font-size:16px; }
   #sessions li { padding:12px 10px; }
   dialog input, dialog select { font-size:16px; }
-  #files { width:100%; border-left:0; }
-  #feditor { font-size:16px; }
+  #files { position:fixed; top:0; right:0; width:100%; height:var(--app-h, 100dvh); z-index:30; border-left:0; padding-top:env(safe-area-inset-top); }
+  .deditor { font-size:16px; }
 }
