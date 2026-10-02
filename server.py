@@ -33,6 +33,7 @@ from send2trash import send2trash
 import auth
 import company_api
 import control_api
+import directives_api
 import push
 import sessions_meta
 import store
@@ -942,6 +943,7 @@ def api_push_test():
 router.include_router(api)
 router.include_router(company_api.router)
 router.include_router(control_api.router)
+router.include_router(directives_api.router)
 
 
 def set_winsize(fd: int, rows: int, cols: int) -> None:

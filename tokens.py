@@ -109,7 +109,7 @@ def bearer(request: Request) -> str | None:
     return value[7:].strip() if value.lower().startswith("bearer ") else None
 
 
-def require(scope: str, allow_login: bool = True) -> Callable[[Request], dict]:
+def require(*scopes: str, allow_login: bool = True) -> Callable[[Request], dict]:
     def dependency(request: Request) -> dict:
         token = bearer(request)
         if token is None and allow_login and login_check(request):
@@ -121,7 +121,7 @@ def require(scope: str, allow_login: bool = True) -> Callable[[Request], dict]:
         principal = lookup(token)
         if principal is None:
             raise HTTPException(401, "토큰이 올바르지 않습니다")
-        if not allowed(principal["role"], scope):
+        if not any(allowed(principal["role"], s) for s in scopes):
             raise HTTPException(403, f"'{principal['role']}' 토큰으로는 이 API를 쓸 수 없습니다")
         return principal
     return dependency
