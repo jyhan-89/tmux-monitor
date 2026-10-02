@@ -37,6 +37,7 @@ import company_api
 import control_api
 import directives_api
 import event_api
+import history_api
 import push
 import sessions_meta
 import store
@@ -950,6 +951,7 @@ router.include_router(control_api.router)
 router.include_router(directives_api.router)
 router.include_router(event_api.router)
 router.include_router(approvals_api.router)
+router.include_router(history_api.router)
 approvals.notify = push.send_all
 
 

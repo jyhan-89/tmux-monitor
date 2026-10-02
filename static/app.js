@@ -321,6 +321,7 @@ function sessionMenu(s) {
     '-',
     { label: '이름 바꾸기', run: () => renameSession(s.name) },
     { label: '그룹으로 이동', run: () => openMove(s) },
+    { label: '최근 이력', run: () => openHistory(s.name) },
   );
   if (conns.has(s.name)) items.push({ label: '탭 닫기 (세션 유지)', run: () => closeSession(s.name) });
   items.push('-', { label: '세션 종료', danger: true, run: () => killSession(s.name) });
@@ -690,6 +691,34 @@ $('instform').addEventListener('submit', async (e) => {
     toast(err.message, 4000);
   }
 });
+
+const HIST_SKIP = new Set(['ts', 'type', 'session']);
+
+async function openHistory(name) {
+  $('histtitle').textContent = `${name} 최근 이력`;
+  const ul = $('histlist');
+  ul.innerHTML = '<li>불러오는 중…</li>';
+  $('histdlg').showModal();
+  let items;
+  try {
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    items = await api('GET', `/history?session=${enc(name)}&since=${enc(since)}&limit=20`);
+  } catch (e) {
+    ul.innerHTML = '';
+    return toast(e.message);
+  }
+  ul.innerHTML = '';
+  for (const ev of items.reverse()) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="t"></span><span class="ty"></span><span class="d"></span>';
+    li.querySelector('.t').textContent = new Date(ev.ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    li.querySelector('.ty').textContent = ev.type;
+    li.querySelector('.d').textContent = Object.entries(ev).filter(([k, v]) => !HIST_SKIP.has(k) && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
+    ul.appendChild(li);
+  }
+  if (!items.length) ul.innerHTML = '<li>최근 7일 이력이 없습니다</li>';
+}
 
 function renderStop(info) {
   $('stopbar').hidden = !info;

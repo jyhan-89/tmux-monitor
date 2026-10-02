@@ -174,7 +174,13 @@ dialog textarea { font:13px ui-monospace, monospace; resize:vertical; }
 #dirtree .dtw { flex:none; width:16px; text-align:center; color:var(--dim); }
 #dirtree .dname { overflow:hidden; text-overflow:ellipsis; }
 #dirtree .dmsg { padding:4px 6px; color:var(--dim); }
-#persistdlg, #layoutdlg, #inboxdlg { width:min(94vw, 640px); }
+#persistdlg, #layoutdlg, #inboxdlg, #histdlg { width:min(94vw, 640px); }
+#histlist { list-style:none; margin:0; padding:0; max-height:60dvh; overflow:auto; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+#histlist li { padding:6px 10px; border-bottom:1px solid var(--line); display:flex; gap:8px; }
+#histlist li:last-child { border-bottom:0; }
+#histlist .t { flex:none; color:var(--dim); font:12px ui-monospace, monospace; }
+#histlist .ty { flex:none; font-weight:600; }
+#histlist .d { flex:1; min-width:0; color:var(--dim); word-break:break-word; }
 #inboxbtn { position:relative; }
 #inboxbadge { position:absolute; top:-4px; right:-4px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--err); color:#fff; font-size:11px; line-height:16px; font-weight:700; }
 #inboxbadge[hidden], #inboxbtn[hidden] { display:none; }

@@ -54,3 +54,22 @@ def test_query_filters_since_and_session():
     history.record({"type": "a", "session": "s2"})
     assert [e["session"] for e in history.query(type="a")] == ["s2"]
     assert [e["session"] for e in history.query(since=old - timedelta(minutes=1), session="s1")] == ["s1"]
+
+
+def test_history_api(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import history_api
+    import store
+    import tokens
+    monkeypatch.setattr(store, "CONFIG_DIR", tmp_path / "cfg")
+    monkeypatch.setattr(tokens, "login_check", lambda request: True)
+    history.record({"type": "a", "session": "s1"})
+    history.record({"type": "b", "session": "s2"})
+    app = FastAPI()
+    app.include_router(history_api.router)
+    c = TestClient(app, client=("127.0.0.1", 5000))
+    assert [e["session"] for e in c.get("/api/history", params={"session": "s2"}).json()] == ["s2"]
+    assert len(c.get("/api/history", params={"since": "2000-01-01T00:00:00"}).json()) == 2
+    assert c.get("/api/history", params={"since": "어제"}).status_code == 400

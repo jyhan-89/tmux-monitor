@@ -52,24 +52,23 @@ def record(event: dict) -> dict:
 
 
 def query(since: datetime | None = None, type: str | None = None, session: str | None = None, limit: int = 200) -> list[dict]:
-    end = _now()
-    start = since or end - timedelta(days=1)
+    start = since or _now() - timedelta(days=1)
+    first = start.astimezone().strftime("%Y/%m/%d")
     out: list[dict] = []
-    day = start.replace(hour=0, minute=0, second=0, microsecond=0)
-    while day.date() <= end.date():
-        path = _file(day)
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if datetime.fromisoformat(ev["ts"]) < start:
-                    continue
-                if type and ev.get("type") != type:
-                    continue
-                if session and ev.get("session") != session:
-                    continue
-                out.append(ev)
-        day += timedelta(days=1)
+    files = sorted(root().glob("[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9].jsonl")) if root().exists() else []
+    for path in files:
+        if path.relative_to(root()).as_posix()[:-6] < first:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if datetime.fromisoformat(ev["ts"]) < start:
+                continue
+            if type and ev.get("type") != type:
+                continue
+            if session and ev.get("session") != session:
+                continue
+            out.append(ev)
     return out[-limit:]
