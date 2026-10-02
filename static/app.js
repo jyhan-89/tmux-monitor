@@ -153,13 +153,26 @@ function parentGroup(g) {
 
 const leafName = (g) => g.slice(g.lastIndexOf('/') + 1);
 
+const GROUP_COLORS = ['#4f9cf9', '#4cc38a', '#f0b35a', '#c792ea', '#f07178', '#5fd3d3', '#e88cc4', '#a3c46a'];
+
+function groupColor(g) {
+  const top = g.split('/')[0];
+  let h = 0;
+  for (const ch of top) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return GROUP_COLORS[h % GROUP_COLORS.length];
+}
+
 function groupHeader(g, members, depth = 0) {
   const key = g ?? '';
   const li = document.createElement('li');
   li.className = 'group';
   li.dataset.group = key;
   li.style.marginLeft = `${depth * 12}px`;
-  if (g) li.title = g;
+  li.classList.toggle('sub', depth > 0);
+  if (g) {
+    li.title = g;
+    li.style.setProperty('--gc', groupColor(g));
+  }
   const folded = collapsedGroups.has(key);
   li.innerHTML = `<span class="gname"></span><span class="gdots"></span><span class="gcount"></span>
     ${g === null ? '' : '<button class="act grename" title="그룹 이름 바꾸기">✎</button><button class="act gdel" title="그룹 삭제">✕</button>'}`;
@@ -212,6 +225,10 @@ function sessionItem(s, inGroup, depth = 0) {
   li.classList.toggle('ingroup', inGroup);
   if (groups.length) {
     li.dataset.group = s.group && groups.includes(s.group) ? s.group : '';
+    if (li.dataset.group) {
+      li.classList.add('ing');
+      li.style.setProperty('--gc', groupColor(s.group));
+    }
     enableDrag(li, s.name);
   } else if (matchMedia('(pointer: fine)').matches) {
     li.draggable = true;

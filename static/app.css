@@ -25,9 +25,13 @@ aside header button { padding:4px 8px; }
 #sessions li:hover { background:#2f3237; }
 #sessions li.open { background:#2a2f38; }
 #sessions li.active { background:#2c3a4f; outline:1px solid var(--accent); }
-#sessions li.group { flex-direction:row; align-items:center; gap:6px; padding:6px 8px; margin-top:6px; color:var(--dim); font-size:12px; font-weight:600; border-bottom:1px solid var(--line); border-radius:0; }
+#sessions li.group { flex-direction:row; align-items:center; gap:6px; padding:7px 8px; margin-top:12px; color:var(--gc, var(--dim)); font-size:13px; font-weight:700;
+  background:color-mix(in srgb, var(--gc, #8b8f97) 14%, transparent); border-left:4px solid var(--gc, var(--line)); border-radius:4px; }
+#sessions li.group.sub { margin-top:6px; font-size:12px; border-left-width:3px; background:color-mix(in srgb, var(--gc) 8%, transparent); }
 #sessions li.group:first-child { margin-top:0; }
-#sessions li.group:hover { background:none; color:var(--fg); }
+#sessions li.group:hover { background:color-mix(in srgb, var(--gc, #8b8f97) 24%, transparent); }
+#sessions li.ing { border-left:2px solid color-mix(in srgb, var(--gc) 55%, transparent); border-radius:0 6px 6px 0; }
+#sessions li.group .gcount { color:var(--dim); }
 #sessions li.group .gname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #sessions li.group .gcount { font-weight:normal; }
 #sessions li.group .gdots { display:flex; gap:3px; }
