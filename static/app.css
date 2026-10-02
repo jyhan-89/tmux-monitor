@@ -32,7 +32,6 @@ aside header button { padding:4px 8px; }
 #sessions li.group .gcount { font-weight:normal; }
 #sessions li.group .gdots { display:flex; gap:3px; }
 #sessions li.group .gdots .dot { width:6px; height:6px; background:currentColor; }
-#sessions li.ingroup { margin-left:10px; }
 #sessions li.dnd { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
 #sessions li.dragging { opacity:.4; }
 #sessions li.group.droptarget { color:var(--accent); background:rgba(79,156,249,.15); outline:1px dashed var(--accent); border-radius:6px; }

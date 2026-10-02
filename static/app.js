@@ -129,24 +129,41 @@ function renderList() {
     for (const s of sorted) ul.appendChild(sessionItem(s, false));
     return;
   }
-  const sections = sortGroupNames(groups).map((g) => [g, sorted.filter((s) => s.group === g)]);
+  const walk = (parent, depth) => {
+    for (const g of sortGroupNames(groups.filter((x) => parentGroup(x) === parent))) {
+      const all = sorted.filter((s) => s.group === g || s.group?.startsWith(`${g}/`));
+      ul.appendChild(groupHeader(g, all, depth));
+      if (collapsedGroups.has(g)) continue;
+      walk(g, depth + 1);
+      for (const s of sorted.filter((x) => x.group === g)) ul.appendChild(sessionItem(s, true, depth + 1));
+    }
+  };
+  walk(null, 0);
   const loose = sorted.filter((s) => !s.group || !groups.includes(s.group));
-  if (loose.length) sections.push([null, loose]);
-  for (const [g, members] of sections) {
-    ul.appendChild(groupHeader(g, members));
-    if (!collapsedGroups.has(g ?? '')) for (const s of members) ul.appendChild(sessionItem(s, true));
+  if (loose.length) {
+    ul.appendChild(groupHeader(null, loose, 0));
+    if (!collapsedGroups.has('')) for (const s of loose) ul.appendChild(sessionItem(s, true, 1));
   }
 }
 
-function groupHeader(g, members) {
+function parentGroup(g) {
+  const i = g.lastIndexOf('/');
+  return i < 0 ? null : g.slice(0, i);
+}
+
+const leafName = (g) => g.slice(g.lastIndexOf('/') + 1);
+
+function groupHeader(g, members, depth = 0) {
   const key = g ?? '';
   const li = document.createElement('li');
   li.className = 'group';
   li.dataset.group = key;
+  li.style.marginLeft = `${depth * 12}px`;
+  if (g) li.title = g;
   const folded = collapsedGroups.has(key);
   li.innerHTML = `<span class="gname"></span><span class="gdots"></span><span class="gcount"></span>
     ${g === null ? '' : '<button class="act grename" title="그룹 이름 바꾸기">✎</button><button class="act gdel" title="그룹 삭제">✕</button>'}`;
-  li.querySelector('.gname').textContent = `${folded ? '▸' : '▾'} ${g ?? '그룹 없음'}`;
+  li.querySelector('.gname').textContent = `${folded ? '▸' : '▾'} ${g === null ? '그룹 없음' : leafName(g)}`;
   li.querySelector('.gcount').textContent = members.length;
   const dots = li.querySelector('.gdots');
   for (const s of members) {
@@ -174,15 +191,22 @@ function groupHeader(g, members) {
       { label: folded ? '펼치기' : '접기', run: () => li.click() },
     ];
     if (g !== null) {
-      items.push('-', { label: '그룹 이름 바꾸기', run: () => renameGroup(g) }, { label: '그룹 삭제', danger: true, run: () => deleteGroup(g, members) });
+      items.push(
+        '-',
+        { label: '하위 그룹 만들기', run: () => newSubGroup(g) },
+        { label: '다른 그룹 안으로 옮기기', run: () => openGroupMove(g) },
+        { label: '그룹 이름 바꾸기', run: () => renameGroup(g) },
+        { label: '그룹 삭제', danger: true, run: () => deleteGroup(g, members) },
+      );
     }
     openCtx(e.clientX, e.clientY, items);
   });
   return li;
 }
 
-function sessionItem(s, inGroup) {
+function sessionItem(s, inGroup, depth = 0) {
   const li = document.createElement('li');
+  if (depth) li.style.marginLeft = `${depth * 12}px`;
   li.classList.toggle('open', conns.has(s.name));
   li.classList.toggle('active', s.name === activeName);
   li.classList.toggle('ingroup', inGroup);
@@ -300,21 +324,60 @@ async function createGroup(name) {
 }
 
 $('newgroup').onclick = async () => {
-  const name = prompt('새 그룹 이름');
+  const name = prompt('새 그룹 이름 (하위 그룹은 상위/하위)');
   if (!name?.trim()) return;
   try { await createGroup(name.trim()); } catch (e) { return toast(e.message); }
   refresh();
 };
 
-async function renameGroup(g) {
-  const name = prompt('그룹 이름 바꾸기', g);
-  if (!name?.trim() || name.trim() === g) return;
+async function moveGroupTo(g, target) {
+  if (target === g || target?.startsWith(`${g}/`)) return toast('그룹을 자기 하위 그룹 안으로 옮길 수 없습니다');
+  const dest = target ? `${target}/${leafName(g)}` : leafName(g);
+  if (dest === g) return true;
   try {
-    await api('PATCH', `/groups/${enc(g)}`, { new_name: name.trim() });
+    await api('PATCH', `/groups/${enc(g)}`, { new_name: dest });
+  } catch (e) {
+    toast(e.message);
+    return false;
+  }
+  for (const k of [...collapsedGroups]) {
+    if (k === g || k.startsWith(`${g}/`)) {
+      collapsedGroups.delete(k);
+      collapsedGroups.add(dest + k.slice(g.length));
+    }
+  }
+  LS.set('collapsedGroups', [...collapsedGroups]);
+  refresh();
+  return true;
+}
+
+async function renameGroup(g) {
+  const name = prompt('그룹 이름 바꾸기', leafName(g));
+  if (!name?.trim() || name.trim() === leafName(g)) return;
+  if (name.includes('/')) return toast("이름에 '/'는 쓸 수 없습니다. 위치를 바꾸려면 '다른 그룹 안으로 옮기기'를 쓰세요", 4000);
+  const parent = parentGroup(g);
+  const dest = parent ? `${parent}/${name.trim()}` : name.trim();
+  try {
+    await api('PATCH', `/groups/${enc(g)}`, { new_name: dest });
   } catch (e) {
     return toast(e.message);
   }
-  if (collapsedGroups.delete(g)) collapsedGroups.add(name.trim());
+  for (const k of [...collapsedGroups]) {
+    if (k === g || k.startsWith(`${g}/`)) {
+      collapsedGroups.delete(k);
+      collapsedGroups.add(dest + k.slice(g.length));
+    }
+  }
+  LS.set('collapsedGroups', [...collapsedGroups]);
+  refresh();
+}
+
+async function newSubGroup(parent) {
+  const name = prompt(`'${leafName(parent)}' 안에 만들 하위 그룹 이름`);
+  if (!name?.trim()) return;
+  if (name.includes('/')) return toast("이름에 '/'는 쓸 수 없습니다", 3000);
+  try { await createGroup(`${parent}/${name.trim()}`); } catch (e) { return toast(e.message); }
+  collapsedGroups.delete(parent);
   LS.set('collapsedGroups', [...collapsedGroups]);
   refresh();
 }
@@ -323,13 +386,15 @@ let deletingGroup = null;
 
 async function deleteGroup(g, members) {
   if (!members.length) {
-    if (!confirm(`'${g}' 그룹을 삭제할까요?`)) return;
+    const subs = groups.filter((x) => x.startsWith(`${g}/`)).length;
+    if (!confirm(`'${leafName(g)}' 그룹${subs ? `과 하위 그룹 ${subs}개` : ''}를 삭제할까요?`)) return;
     return removeGroup(g, false);
   }
   deletingGroup = { g, members };
-  $('groupdeltitle').textContent = `'${g}' 그룹 삭제`;
+  const subs = groups.filter((x) => x.startsWith(`${g}/`)).length;
+  $('groupdeltitle').textContent = `'${leafName(g)}' 그룹 삭제`;
   $('groupdelmsg').textContent =
-    `이 그룹에 세션 ${members.length}개가 있습니다 (${members.map((s) => s.name).join(', ')}). 세션을 어떻게 할까요?`;
+    `${subs ? `하위 그룹 ${subs}개도 함께 삭제됩니다. ` : ''}이 그룹${subs ? '과 하위 그룹' : ''}에 세션 ${members.length}개가 있습니다 (${members.map((s) => s.name).join(', ')}). 세션을 어떻게 할까요?`;
   $('groupdeldlg').showModal();
 }
 
@@ -342,7 +407,7 @@ async function removeGroup(g, kill) {
   } catch (e) {
     toast(e.message);
   }
-  collapsedGroups.delete(g);
+  for (const k of [...collapsedGroups]) if (k === g || k.startsWith(`${g}/`)) collapsedGroups.delete(k);
   LS.set('collapsedGroups', [...collapsedGroups]);
   refresh();
 }
@@ -361,18 +426,60 @@ $('groupdelkill').onclick = () => {
 
 let movingSession = null;
 
+function groupTreeOrder() {
+  const out = [];
+  const walk = (parent) => {
+    for (const g of sortGroupNames(groups.filter((x) => parentGroup(x) === parent))) {
+      out.push(g);
+      walk(g);
+    }
+  };
+  walk(null);
+  return out;
+}
+
+function moveButton(label, depth, current, onClick) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.paddingLeft = `${12 + depth * 16}px`;
+  if (current) b.className = 'cur';
+  b.onclick = onClick;
+  return b;
+}
+
+function openGroupMove(g) {
+  movingSession = null;
+  movingGroup = g;
+  $('movetitle').textContent = `'${leafName(g)}' 그룹 옮기기`;
+  const box = $('movelist');
+  box.innerHTML = '';
+  box.appendChild(moveButton('최상위', 0, parentGroup(g) === null, () => moveGroupHere(null)));
+  for (const t of groupTreeOrder()) {
+    if (t === g || t.startsWith(`${g}/`)) continue;
+    box.appendChild(moveButton(`📁 ${leafName(t)}`, t.split('/').length, parentGroup(g) === t, () => moveGroupHere(t)));
+  }
+  $('movenew').value = '';
+  $('movenew').placeholder = '새 그룹 이름 (만들고 그 안으로 옮김)';
+  $('movedlg').showModal();
+}
+
+async function moveGroupHere(target) {
+  if (await moveGroupTo(movingGroup, target)) $('movedlg').close();
+}
+
+let movingGroup = null;
+
 function openMove(s) {
   movingSession = s.name;
+  movingGroup = null;
+  $('movenew').placeholder = '새 그룹 이름 (하위 그룹은 상위/하위)';
   $('movetitle').textContent = `'${s.name}' 그룹 이동`;
   const box = $('movelist');
   box.innerHTML = '';
-  for (const g of [...sortGroupNames(groups), null]) {
-    const b = document.createElement('button');
-    b.textContent = g === null ? '그룹 없음' : `📁 ${g}`;
-    if ((s.group ?? null) === g) b.className = 'cur';
-    b.onclick = () => moveTo(g);
-    box.appendChild(b);
+  for (const g of groupTreeOrder()) {
+    box.appendChild(moveButton(`📁 ${leafName(g)}`, g.split('/').length - 1, s.group === g, () => moveTo(g)));
   }
+  box.appendChild(moveButton('그룹 없음', 0, !s.group || !groups.includes(s.group), () => moveTo(null)));
   $('movenew').value = '';
   $('movedlg').showModal();
 }
@@ -509,9 +616,13 @@ $('sessions').addEventListener('drop', (e) => {
 
 $('moveform').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const name = $('movenew').value.trim();
+  const name = $('movenew').value.trim().replace(/^\/+|\/+$/g, '');
   if (!name) return;
   try { await createGroup(name); } catch (err) { return toast(err.message); }
+  if (movingGroup) {
+    await refresh();
+    return moveGroupHere(name);
+  }
   moveTo(name);
 });
 

@@ -58,10 +58,23 @@ def group_of() -> dict[str, str]:
     return {s: g for g, members in groups().items() for s in members}
 
 
+def _subtree(gs: dict, name: str) -> list[str]:
+    return [k for k in gs if k == name or k.startswith(name + "/")]
+
+
+def _with_parents(gs: dict, name: str) -> dict:
+    parts = name.split("/")
+    out = dict(gs)
+    for i in range(1, len(parts)):
+        out.setdefault("/".join(parts[:i]), [])
+    return out
+
+
 def create_group(name: str) -> None:
     gs = groups()
     if name in gs:
         raise ValueError("이미 있는 그룹입니다")
+    gs = _with_parents(gs, name)
     gs[name] = []
     _save_groups(gs)
 
@@ -70,16 +83,24 @@ def rename_group(old: str, new: str) -> None:
     gs = groups()
     if old not in gs:
         raise KeyError("그룹이 없습니다")
-    if new != old and new in gs:
+    if new == old:
+        return
+    if new.startswith(old + "/"):
+        raise ValueError("그룹을 자기 하위 그룹 안으로 옮길 수 없습니다")
+    moved = _subtree(gs, old)
+    targets = {k: new + k[len(old):] for k in moved}
+    if any(t in gs and t not in moved for t in targets.values()):
         raise ValueError("이미 있는 그룹입니다")
-    _save_groups({(new if k == old else k): v for k, v in gs.items()})
+    _save_groups(_with_parents({targets.get(k, k): v for k, v in gs.items()}, new))
 
 
 def delete_group(name: str) -> list[str]:
     gs = groups()
     if name not in gs:
         raise KeyError("그룹이 없습니다")
-    members = gs.pop(name)
+    members = []
+    for k in _subtree(gs, name):
+        members += gs.pop(k)
     _save_groups(gs)
     return members
 

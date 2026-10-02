@@ -15,7 +15,7 @@ The UI is in Korean.
 
 ## Features
 
-- **Session list**: last 3 lines of output and a status per session (shell, running, Claude working / needs input / idle), sorting, groups
+- **Session list**: last 3 lines of output and a status per session (shell, running, Claude working / needs input / idle), sorting, groups (can be nested)
 - **Terminal**: attaches to tmux sessions with xterm.js; reconnects automatically when the connection drops
 - **Split view**: drag a tab to split up/down/left/right, a tab bar per area, resize with the dividers
 - **Virtual desktops**: each desktop keeps its own split layout and tabs; switch with Alt+1–9. A session can be on several desktops
@@ -89,6 +89,7 @@ open `http://localhost:8765/dev/setup` **in a browser on the server PC**.
 | Desktops | Number buttons at the top to switch, ＋ to add, right-click to rename/delete, drop a tab on a number to move it |
 | Save/load desktop setups | ⋯ next to the desktop buttons. Stored on the server, so other devices and URLs can load them. After saving or loading, later changes are saved to that setup automatically (can be unlinked) |
 | Session / group menu | Right-click in the list (phone: 📁 ✎ ✕ buttons) |
+| Nested groups | Right-click a group → Create subgroup / Move into another group, or type `parent/child` as the group name |
 | Type Korean | Type in the input box at the bottom, then Enter |
 | See earlier output | Mouse wheel / swipe up or down on a phone |
 | Copy | Select by dragging (inside Claude's screen, Shift+drag or the setting below) |

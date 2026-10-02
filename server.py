@@ -370,10 +370,10 @@ async def api_upload(name: str, file: UploadFile):
 
 
 def valid_group(name: str) -> str:
-    name = name.strip()
-    if not name or len(name) > 40:
-        raise HTTPException(400, "그룹 이름은 1~40자로 입력하세요")
-    return name
+    parts = [p.strip() for p in name.strip().strip("/").split("/")]
+    if not parts or any(not p or len(p) > 40 for p in parts) or len(parts) > 6:
+        raise HTTPException(400, "그룹 이름은 1~40자로 입력하세요 (하위 그룹은 '/'로 구분, 최대 6단계)")
+    return "/".join(parts)
 
 
 @api.get("/groups")
@@ -398,7 +398,7 @@ class GroupRename(BaseModel):
     new_name: str
 
 
-@api.patch("/groups/{name}")
+@api.patch("/groups/{name:path}")
 def api_rename_group(name: str, body: GroupRename):
     try:
         store.rename_group(name, valid_group(body.new_name))
@@ -409,7 +409,7 @@ def api_rename_group(name: str, body: GroupRename):
     return {"ok": True}
 
 
-@api.delete("/groups/{name}")
+@api.delete("/groups/{name:path}")
 def api_delete_group(name: str, kill: bool = False):
     try:
         members = store.delete_group(name)
