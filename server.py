@@ -34,6 +34,7 @@ import auth
 import push
 import sessions_meta
 import store
+import tokens
 from tmuxctl import capture, list_sessions, session_exists, tmux, valid_name
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -73,6 +74,7 @@ def require_login(request: Request) -> None:
 
 
 api = APIRouter(prefix="/api", dependencies=[Depends(require_login)])
+tokens.login_check = lambda request: auth.valid_session(request.cookies.get(COOKIE))
 
 
 def client_ip(request: Request) -> str:
