@@ -132,3 +132,14 @@ def test_issue_has_location():
     issue = next(i for i in e.value.issues if i.rule == "on_fail")
     assert issue.where == "process.templates.feature_dev.nodes.review.on_fail"
     assert issue.as_dict()["message"]
+
+
+def test_every_role_has_prompt_template():
+    org = models.parse_org((SAMPLE / "org.yaml").read_text())
+    prompts = SAMPLE.parent.parent
+    assert (prompts / "prompts" / "common.md").exists()
+    for role in org.roles.values():
+        assert (prompts / role.prompt).exists(), role.prompt
+        text = (prompts / role.prompt).read_text()
+        for section in ("## 책임", "## 수정 가능", "## 산출물", "## 금지"):
+            assert section in text, (role.id, section)
