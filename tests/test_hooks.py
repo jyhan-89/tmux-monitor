@@ -159,3 +159,16 @@ def test_script_posts_event(env):
     finally:
         server.should_exit = True
         t.join(timeout=5)
+
+
+def test_ensure_ready_accepts_trust_once(monkeypatch):
+    import launcher
+    screens = iter(["", "Quick safety check\n❯ No, exit\n  Yes, I trust this folder", "Yes, I trust this folder",
+                    "❯ \n  ⏵⏵ don't ask on (shift+tab to cycle)"])
+    sent = []
+    monkeypatch.setattr(launcher, "screen", lambda name: next(screens))
+    monkeypatch.setattr(launcher.tmuxctl, "tmux", lambda *a: sent.append(a[-1]))
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
+    monkeypatch.setattr(launcher.history, "record", lambda e: e)
+    assert launcher.ensure_ready("s", timeout=5)
+    assert sent == ["Down", "Enter"]

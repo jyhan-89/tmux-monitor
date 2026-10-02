@@ -14,6 +14,10 @@ root, w = Path(sys.argv[1]), Path(sys.argv[2])
 sample = root / "company/examples/mw-minimal"
 org = yaml.safe_load((sample / "org.yaml").read_text())
 org["divisions"]["mw"].update(template="mini", repo=str(w / "repo"))
+import os
+if os.environ.get("E2E_REAL"):
+    for m in list(org["shared"].values()) + [m for d in org["divisions"]["mw"]["depts"].values() for m in (d.get("lead"), d.get("members")) if m]:
+        m["model"] = "haiku"
 (w / "cfg/company/org.yaml").write_text(yaml.safe_dump(org, allow_unicode=True))
 (w / "cfg/company/documents.yaml").write_text((sample / "documents.yaml").read_text())
 import os
@@ -30,7 +34,9 @@ templates:
 """).replace("REVIEW_APPROVAL", "true" if os.environ.get("E2E_APPROVAL") else "false"))
 PY
 export TMUX_TMPDIR="$TDIR" TMUX_WEB_CONFIG="$W/cfg" TMUX_WEB_AUTH="$W/cfg/auth.json" TMUX_WEB_DATA="$W/data" PORT
-export TMUX_WEB_CLAUDE_CMD="python3 $ROOT/tests/manual/fake_claude.py"
+if [ -z "${E2E_REAL:-}" ]; then
+  export TMUX_WEB_CLAUDE_CMD="python3 $ROOT/tests/manual/fake_claude.py"
+fi
 unset TMUX TMUX_PANE
 cd "$ROOT"
 setsid .venv/bin/python server.py > "$W/server.log" 2>&1 &
@@ -42,13 +48,13 @@ else
   printf 'testpass123\n' | TMUX_WEB_AUTH="$W/cfg/auth.json" .venv/bin/python auth.py tester >/dev/null 2>&1 || true
 fi
 for _ in $(seq 50); do curl -s -o /dev/null "localhost:$PORT/dev/login" && break; sleep 0.2; done
-.venv/bin/python orchestrator.py start mw svc_a --brief "svc-a 기능 구현"
+.venv/bin/python orchestrator.py start mw svc_a --brief "${E2E_BRIEF:-svc-a 기능 구현}"
 for i in $(seq "${E2E_TICKS:-60}"); do
   .venv/bin/python orchestrator.py run --once 2>>"$W/orch.log"
   status=$(.venv/bin/python orchestrator.py list)
   echo "[$i] $status"
   case "$status" in *" done "*|*escalated*) break ;; esac
-  sleep 1
+  sleep "${E2E_SLEEP:-1}"
 done
 echo "--- tmux sessions"; tmux -S "$SOCK" ls -F '#S'
 echo "--- orchestrator log"; tail -5 "$W/orch.log"

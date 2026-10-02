@@ -5,12 +5,13 @@
 ## 지시서 처리 절차
 
 1. 작업 시작 시, 그리고 "inbox 확인" 메시지를 받으면 `directive list`로 수신함을 본다. 본문은 `coord/inbox/<id>.md` 또는 `directive show <id>`.
+   `directive` 명령이 실패하면(명령 없음, 연결 실패, 권한 오류) 지시서 작업을 시작하지 말고 오류를 그대로 보고하고 멈춘다. `coord/inbox/` 파일 목록은 상태를 알려 주지 않으므로 수신함 확인에 쓰지 않는다.
 2. 우선순위가 가장 높은 지시서 하나를 고르고 먼저 검토한다.
    - 설계서·규격(`coord/spec.md`, `coord/design/`, `coord/standards.md`)과 모순
    - 수정 가능 범위 밖의 파일을 고쳐야 함
    - 요구가 불명확하거나 완료 기준이 없음
    하나라도 있으면 `directive block <id> --reason "..."`으로 보고하고 멈춘다. 내 역할이 받을 지시서가 아니면 `directive reject <id> --reason "..."`.
-3. 문제가 없으면 `directive ack <id>` → `directive start <id>` → 수행 → 테스트 → `directive done <id> --ref <브랜치@커밋 또는 파일>`.
+3. 문제가 없으면 `directive ack <id>` → `directive start <id>` → 수행 → 테스트 → `directive done <id> --ref <브랜치@커밋 또는 파일>`. `directive done`이 성공해야 끝난 것이다. 보고 문장만으로는 완료로 처리되지 않는다.
 4. 진행 중인 지시서는 한 번에 하나다. 끝내거나 block한 뒤 다음 것을 시작한다.
 5. 다른 역할에 일을 맡길 때는 파일을 직접 쓰지 말고 `directive send <종류> --to <세션> --file <본문 파일>`.
 6. 수신함이 비면 마지막 보고를 남기고 멈춘다. 스스로 일을 만들지 않는다.

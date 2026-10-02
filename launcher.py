@@ -1,8 +1,10 @@
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -73,7 +75,7 @@ def edit_rules(globs: list[str]) -> list[str]:
     out = []
     for g in globs:
         path = g if g.startswith("/") else f"/{g}"
-        out += [f"Edit({path})", f"Write({path})"]
+        out.append(f"Edit({path})")
     return out
 
 
@@ -82,6 +84,8 @@ def permissions(company: models.Company, role: models.Role) -> dict:
     if wide:
         raise LaunchError(f"역할 '{role.id}'의 allowed_tools가 너무 넓습니다: {wide}")
     tools = [t for t in role.allowed_tools if t not in ("Edit", "Write")]
+    if "Bash(directive:*)" in tools:
+        tools.append(f"Bash({BIN / 'directive'}:*)")
     can_edit = role.can_edit if {"Edit", "Write"} & set(role.allowed_tools) else []
     others = [d.pattern for d in company.documents.documents if d.owner != role.id]
     deny = edit_rules(role.cannot_edit) + edit_rules([p for p in others if p not in can_edit])
@@ -105,7 +109,7 @@ def claude_md(company: models.Company, p: Placement) -> str:
                  f"- 수정 가능: {', '.join(f'`{x}`' for x in p.role.can_edit) or '없음'}\n"
                  f"- 수정 금지: {', '.join(f'`{x}`' for x in p.role.cannot_edit) or '없음'}\n"
                  f"- 소유 문서: {', '.join(f'`{x}`' for x in owned) or '없음'}\n"
-                 "- 지시서 도구: `directive` (list, show, ack, start, done, block, reject, send)")
+                 f"- 지시서 도구: `directive` (list, show, ack, start, done, block, reject, send). 경로: `{BIN / 'directive'}`")
     return "\n\n".join(parts) + "\n"
 
 
@@ -143,13 +147,15 @@ def worktree(div: models.Division, name: str, branch: str, base: str) -> Path:
     return path
 
 
-def write_settings(path: Path, perms: dict) -> None:
+def write_settings(path: Path, perms: dict, env: dict | None = None) -> None:
     f = path / ".claude" / "settings.json"
     try:
         settings = json.loads(f.read_text())
     except FileNotFoundError:
         settings = {}
     settings["permissions"] = perms
+    if env:
+        settings["env"] = {**settings.get("env", {}), **env}
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
     hooks_install.install(path)
@@ -164,21 +170,21 @@ def launch(division: str, dept: str, role: str, suffix: str | None = None, featu
     perms = permissions(company, p.role)
     branch = f"feat/{feature or 'work'}/{suffix or role}"
     path = worktree(p.division, name, branch, base)
-    write_settings(path, perms)
+    token = tokens.issue("session", name)
+    env = {"TMUX_WEB_SESSION": name, "TMUX_WEB_TOKEN": token, "TMUX_WEB_URL": server_url(),
+           "PATH": f"{BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
+    write_settings(path, perms, env)
     md = claude_md(company, p)
     (path / "CLAUDE.md").write_text(md)
     (path / "coord" / "inbox").mkdir(parents=True, exist_ok=True)
     exclude = Path(run_git("rev-parse", "--git-path", "info/exclude", cwd=path))
     exclude = exclude if exclude.is_absolute() else path / exclude
     lines = exclude.read_text().splitlines() if exclude.exists() else []
-    for pat in ("coord/inbox/", ".claude/settings.json", "CLAUDE.md"):
+    for pat in ("coord/inbox/", ".claude/", "CLAUDE.md"):
         if pat not in lines:
             lines.append(pat)
     exclude.parent.mkdir(parents=True, exist_ok=True)
     exclude.write_text("\n".join(lines) + "\n")
-    token = tokens.issue("session", name)
-    env = {"TMUX_WEB_SESSION": name, "TMUX_WEB_TOKEN": token, "TMUX_WEB_URL": server_url(),
-           "PATH": f"{BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
     args = ["new-session", "-d", "-s", name, "-c", str(path)]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
@@ -190,16 +196,45 @@ def launch(division: str, dept: str, role: str, suffix: str | None = None, featu
     if p.member.model and cmd == "claude":
         cmd += f" --model {shlex.quote(p.member.model)}"
     tmuxctl.tmux("send-keys", "-t", f"={name}:", cmd, "Enter")
+    ready = ensure_ready(name) if cmd.split()[0] == "claude" else True
     meta = sessions_meta.update(name, division=division, dept=dept, role=role, branch=branch, worktree=str(path))
     sessions_meta.adopt([name])
     history.record({"type": "session_start", "session": name, "source": "launcher", "branch": branch,
                     "claude_md_sha256": hashlib.sha256(md.encode()).hexdigest()[:16]})
     directives.deliver_pending(name)
-    return {"name": name, "created": True, **meta, "permissions": perms}
+    return {"name": name, "created": True, "ready": ready, **meta, "permissions": perms}
+
+
+TRUST_PROMPT = re.compile(r"trust this folder|Do you trust the files")
+READY = re.compile(r"\? for shortcuts|shift\+tab to cycle|don't ask on|bypass permissions on|accept edits on")
+
+
+def screen(name: str) -> str:
+    return tmuxctl.capture(f"={name}:")
+
+
+def ensure_ready(name: str, timeout: float = 40.0) -> bool:
+    deadline = time.time() + timeout
+    trusted = False
+    while time.time() < deadline:
+        text = screen(name)
+        if TRUST_PROMPT.search(text):
+            if not trusted:
+                tmuxctl.tmux("send-keys", "-t", f"={name}:", "Down")
+                time.sleep(0.3)
+                tmuxctl.tmux("send-keys", "-t", f"={name}:", "Enter")
+                trusted = True
+                history.record({"type": "status_change", "session": name, "to": "trusted", "source": "launcher"})
+        elif READY.search(text):
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def wake(name: str, text: str = "inbox 확인") -> bool:
     if not tmuxctl.session_exists(name):
+        return False
+    if TRUST_PROMPT.search(screen(name)) and not ensure_ready(name, 15):
         return False
     return tmuxctl.tmux("send-keys", "-t", f"={name}:", "-l", text).returncode == 0 and \
         tmuxctl.tmux("send-keys", "-t", f"={name}:", "Enter").returncode == 0

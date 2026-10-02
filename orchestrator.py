@@ -36,7 +36,7 @@ class Server:
         req = urllib.request.Request(f"{self.url}/api{path}", data=data, method=method,
                                      headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=90) as r:
                 return json.loads(r.read() or b"null")
         except urllib.error.HTTPError as e:
             raise ApiError(f"{method} {path}: {e.code} {e.read().decode(errors='replace')[:300]}")
