@@ -116,6 +116,8 @@ def new_instance(company: models.Company, division: str, feature: str, brief: st
     div = company.org.divisions.get(division)
     if not div:
         raise ValueError(f"본부 '{division}'이(가) 없습니다")
+    if not company.process.templates:
+        raise ValueError(f"본부 '{division}'에 쓸 프로세스 템플릿이 없습니다")
     tkey = div.template or next(iter(company.process.templates))
     if state_path(division, feature).exists():
         raise ValueError(f"이미 있는 인스턴스: {division}/{feature}")
@@ -229,6 +231,9 @@ class Orchestrator:
 
     def tick(self, now: float | None = None) -> None:
         now = time.time() if now is None else now
+        beat = state_dir() / "heartbeat"
+        beat.parent.mkdir(parents=True, exist_ok=True)
+        beat.write_text(str(time.time()))
         company = self.server.company()
         for cmd in commands.take():
             self.command(company, cmd)

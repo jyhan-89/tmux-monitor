@@ -424,6 +424,8 @@ def check_all(org: Org, process: Process, documents: Documents) -> None:
     for key, div in org.divisions.items():
         w = f"org.divisions.{key}"
         tkey = div.template or (next(iter(process.templates)) if len(process.templates) == 1 else "")
+        if not div.template and not process.templates:
+            continue
         t = process.templates.get(tkey)
         if not t:
             r.add("template_ref", f"{w}.template", f"template '{div.template}'이(가) process에 없습니다 (템플릿이 여럿이면 지정 필요)")

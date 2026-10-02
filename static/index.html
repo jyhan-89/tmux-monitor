@@ -46,7 +46,7 @@
     <div id="bar">
       <button id="menu" title="세션 목록 (열기/닫기)">☰</button>
       <button id="inboxbtn" title="결재함 · 진행 중인 기능" hidden>📝<span id="inboxbadge" hidden></span></button>
-      <button id="graphbtn" title="조직도 · 프로세스" hidden>🏢</button>
+      <button id="graphbtn" title="조직도 · 프로세스">🏢</button>
       <button id="layoutchip" class="none" title="데스크탑 구성"><span class="lcicon">📁</span><span class="lcname">구성 없음</span><span class="lcdot"></span></button>
       <div id="desks"></div>
       <div id="tabs"></div>
@@ -65,7 +65,9 @@
         <button class="gtab" data-view="process">프로세스</button>
         <select id="gdivsel" title="본부" hidden></select>
         <select id="ginstsel" title="인스턴스" hidden></select>
+        <span id="gactions"></span>
         <span id="glegend"></span>
+        <span id="gorch" hidden></span>
         <button id="gclose" title="터미널로">닫기</button>
       </div>
       <div class="gbody"><div id="gcanvas"></div><aside id="gpanel" hidden></aside></div>

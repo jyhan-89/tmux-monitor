@@ -71,3 +71,23 @@
   #graph .gbody { flex-direction:column; }
   #gpanel { width:auto; max-height:50%; border-left:0; border-top:1px solid var(--line); }
 }
+#gactions { display:flex; gap:6px; }
+#gactions button { padding:3px 10px; font-size:13px; }
+#gorch { font-size:12px; padding:2px 8px; border-radius:10px; }
+#gorch.on { color:var(--ok); background:rgba(76,195,138,.12); }
+#gorch.off { color:var(--warn); background:rgba(240,179,90,.12); cursor:help; }
+#gorch[hidden] { display:none; }
+#gcanvas .click { cursor:pointer; }
+#gcanvas .click:hover { fill:var(--accent); }
+#gcanvas .gbox[data-act] { cursor:pointer; }
+#gcanvas .gbox.sel { stroke:var(--accent); stroke-width:2; }
+#gcanvas .ginit { max-width:520px; margin:40px auto; padding:20px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+#gcanvas .ginit h3 { margin:0 0 8px; }
+#gcanvas .ginit p { color:var(--fg); font-size:14px; }
+#gcanvas .ginit .gdim { color:var(--dim); font-size:12px; }
+#gcanvas .ginit .opts { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0; }
+#gpanel h4 { margin:6px 0 0; font-size:12px; color:var(--fg); border-top:1px solid var(--line); padding-top:8px; }
+#gpanel select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 6px; font:inherit; font-size:12px; }
+#gpanel .glist { margin:0; padding-left:16px; font-size:12px; }
+#gpanel .newrole[hidden], #gpanel [hidden] { display:none; }
+#gpanel button.danger { color:var(--err); border-color:rgba(240,113,120,.5); }

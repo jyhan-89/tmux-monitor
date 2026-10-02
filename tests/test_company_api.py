@@ -85,3 +85,19 @@ def test_model_and_patch(client):
     assert r.status_code == 400 and r.json()["detail"]["issues"][0]["rule"] == "on_fail"
     assert "on_fail" in client.get("/api/company/model").json()["process"]["templates"]["feature_dev"]["nodes"]["review"]
     assert client.patch("/api/company/org", json={"ops": [{"path": ["roles", "impl", "allowed_tools", 99], "value": "x"}]}).status_code == 400
+
+
+def test_init_example_and_empty(client, tmp_path):
+    assert client.post("/api/company/init", json={"template": "nope"}).status_code == 400
+    assert client.post("/api/company/init", json={"template": "empty"}).status_code == 200
+    assert client.get("/api/company").json()["complete"] is True
+    assert (tokens.company_dir() / "prompts" / "common.md").exists()
+    assert tokens.token_file("orchestrator").exists()
+    assert client.post("/api/company/init", json={"template": "example"}).status_code == 409
+    s = client.get("/api/company").json()
+    assert s["orchestrator"] == {"alive": False, "last": None}
+
+
+def test_init_example(client):
+    assert client.post("/api/company/init", json={"template": "example"}).status_code == 200
+    assert "mw" in client.get("/api/company/model").json()["org"]["divisions"]

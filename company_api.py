@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import commands
+import history
+import time
 import yaml
 import launcher
 import models
@@ -91,6 +93,56 @@ def git_commit(kind: str) -> None:
         log.warning("company git commit 실패: %s", getattr(e, "stderr", e))
 
 
+EMPTY = {"org": "version: 1\nshared: {}\ndivisions: {}\nprofiles: {}\nroles: {}\n",
+         "process": "version: 1\ntemplates: {}\n",
+         "documents": "version: 1\ndocuments: {}\ndirectives:\n  node: {from: orchestrator, to: any}\n  merge: {from: orchestrator, to: any}\n  status: {from: any, to: any}\n"}
+EXAMPLES = Path(__file__).resolve().parent / "company"
+
+
+def copy_missing(src: Path, dst: Path) -> None:
+    for f in src.rglob("*"):
+        if f.is_file():
+            target = dst / f.relative_to(src)
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(f.read_bytes())
+
+
+class Init(BaseModel):
+    template: str = "example"
+
+
+@router.post("/init")
+def init(body: Init, _: dict = Depends(tokens.require("company.write"))):
+    if any(kind_path(k).exists() for k in KINDS):
+        raise HTTPException(409, "이미 조직 정의가 있습니다")
+    if body.template == "example":
+        texts = {k: (EXAMPLES / "examples" / "mw-minimal" / f"{k}.yaml").read_text() for k in KINDS}
+    elif body.template == "empty":
+        texts = dict(EMPTY)
+    else:
+        raise HTTPException(400, "template은 example 또는 empty입니다")
+    validate(texts)
+    folder = tokens.company_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    copy_missing(EXAMPLES / "prompts", folder / "prompts")
+    for k, text in texts.items():
+        kind_path(k).write_text(text)
+        git_commit(k)
+    tokens.ensure_token("orchestrator")
+    tokens.ensure_token("hook")
+    return {"ok": True}
+
+
+def orchestrator_alive() -> dict:
+    p = history.DATA_DIR / "state" / "heartbeat"
+    try:
+        at = float(p.read_text())
+    except (FileNotFoundError, ValueError):
+        return {"alive": False, "last": None}
+    return {"alive": time.time() - at < 60, "last": at}
+
+
 @router.get("")
 def summary(_: dict = Depends(tokens.require("company.read"))):
     texts = read_texts()
@@ -99,7 +151,8 @@ def summary(_: dict = Depends(tokens.require("company.read"))):
         issues = []
     except models.DefinitionError as e:
         issues = [i.as_dict() for i in e.issues]
-    return {"exists": {k: k in texts for k in KINDS}, "complete": len(texts) == len(KINDS), "issues": issues}
+    return {"exists": {k: k in texts for k in KINDS}, "complete": len(texts) == len(KINDS), "issues": issues,
+            "orchestrator": orchestrator_alive()}
 
 
 @router.get("/divisions")
