@@ -32,6 +32,7 @@ from send2trash import send2trash
 
 import auth
 import push
+import sessions_meta
 import store
 from tmuxctl import capture, list_sessions, session_exists, tmux, valid_name
 
@@ -240,9 +241,12 @@ def api_version():
 @api.get("/sessions")
 def api_sessions():
     sessions = list_sessions()
+    sessions_meta.adopt([s["name"] for s in sessions])
     group_of = store.group_of()
+    metas = sessions_meta.all_meta()
     for s in sessions:
         s["group"] = group_of.get(s["name"])
+        s["meta"] = metas.get(s["name"])
         st = push.status.get(s["name"], {})
         s["state"] = st.get("state", "")
         s["preview"] = st.get("preview", [])
@@ -281,6 +285,7 @@ def api_rename_session(name: str, body: Rename):
         raise HTTPException(400, "세션 이름이 비어 있거나 '.' ':' 가 들어 있습니다")
     run("rename-session", "-t", f"={name}", new)
     store.rename_session(name, new)
+    sessions_meta.rename(name, new)
     return {"ok": True}
 
 
@@ -288,6 +293,7 @@ def api_rename_session(name: str, body: Rename):
 def api_kill_session(name: str):
     run("kill-session", "-t", f"={name}")
     store.forget_session(name)
+    sessions_meta.forget(name)
     return {"ok": True}
 
 
