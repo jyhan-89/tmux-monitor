@@ -87,7 +87,7 @@ open `http://localhost:8765/dev/setup` **in a browser on the server PC**.
 | Open a session | Click it in the list. It opens as a tab in the selected area |
 | Split the view | Drag a tab or a session from the list to an edge of the terminal area |
 | Desktops | Number buttons at the top to switch, ＋ to add, right-click to rename/delete, drop a tab on a number to move it |
-| Save/load desktop setups | ⋯ next to the desktop buttons. Stored on the server, so other devices and URLs can load them |
+| Save/load desktop setups | ⋯ next to the desktop buttons. Stored on the server, so other devices and URLs can load them. After saving or loading, later changes are saved to that setup automatically (can be unlinked) |
 | Session / group menu | Right-click in the list (phone: 📁 ✎ ✕ buttons) |
 | Type Korean | Type in the input box at the bottom, then Enter |
 | See earlier output | Mouse wheel / swipe up or down on a phone |

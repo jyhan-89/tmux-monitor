@@ -169,6 +169,8 @@
     <button type="button" data-close>닫기</button>
   </div>
   <p class="hint">데스크탑 목록과 데스크탑별 분할 배치·탭을 서버에 저장합니다. 다른 기기나 다른 주소에서도 불러올 수 있습니다.</p>
+  <p class="hint" id="layoutlink" hidden>연결된 구성: <b class="lname"></b> · 변경 사항 자동 저장<span class="ltime"></span>
+    <button type="button" id="layoutunlink">연결 끊기</button></p>
   <form id="layoutform" class="inline" style="margin-top:10px">
     <input id="layoutname" placeholder="저장할 이름 (예: 평소, 빌드 작업)" maxlength="40" autocomplete="off">
     <button class="primary">현재 구성 저장</button>

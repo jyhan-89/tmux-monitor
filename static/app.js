@@ -557,6 +557,7 @@ function saveTabs() {
   LS.set('openTabs', [...conns.keys()]);
   LS.set('desks', desks.map((d) => ({ name: d.name, tree: d.tree, active: d.active })));
   LS.set('deskIdx', deskIdx);
+  scheduleAutoSave();
 }
 
 function openSession(name) {
@@ -869,6 +870,71 @@ function applyDesks(saved, idx, extra = []) {
   return missing;
 }
 
+let layoutLink = LS.get('layoutLink', null);
+let linkTimer = null;
+let linkSent = '';
+let linkSavedAt = null;
+
+function layoutBody() {
+  return { desks: desks.map((d) => ({ name: d.name, tree: d.tree, active: d.active })), deskIdx };
+}
+
+function setLink(name) {
+  layoutLink = name;
+  LS.set('layoutLink', name);
+  clearTimeout(linkTimer);
+  linkTimer = null;
+  linkSent = name ? JSON.stringify(layoutBody()) : '';
+  linkSavedAt = name ? Date.now() : null;
+  renderDesks();
+  renderLinkStatus();
+}
+
+function scheduleAutoSave() {
+  if (!layoutLink) return;
+  clearTimeout(linkTimer);
+  linkTimer = setTimeout(autoSaveNow, 1500);
+}
+
+async function autoSaveNow() {
+  linkTimer = null;
+  if (!layoutLink) return;
+  const body = layoutBody();
+  const json = JSON.stringify(body);
+  if (json === linkSent) return;
+  try {
+    await api('PUT', `/layouts/${enc(layoutLink)}`, body);
+    linkSent = json;
+    linkSavedAt = Date.now();
+  } catch (e) {
+    toast(`'${layoutLink}' 자동 저장 실패: ${e.message}`, 5000);
+  }
+  renderDesks();
+  renderLinkStatus();
+}
+
+function flushAutoSave() {
+  if (!layoutLink || !linkTimer) return;
+  clearTimeout(linkTimer);
+  linkTimer = null;
+  const json = JSON.stringify(layoutBody());
+  if (json === linkSent) return;
+  fetch(`${base}/api/layouts/${enc(layoutLink)}`, {
+    method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: json,
+  }).catch(() => {});
+}
+
+window.addEventListener('pagehide', flushAutoSave);
+
+function renderLinkStatus() {
+  const box = $('layoutlink');
+  if (!box) return;
+  box.hidden = !layoutLink;
+  if (!layoutLink) return;
+  box.querySelector('.lname').textContent = layoutLink;
+  box.querySelector('.ltime').textContent = linkSavedAt ? ` · 마지막 저장 ${new Date(linkSavedAt).toLocaleTimeString('ko-KR')}` : '';
+}
+
 const fmtTime = (t) => new Date(t * 1000).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 
 async function loadLayouts() {
@@ -884,12 +950,14 @@ async function loadLayouts() {
     const li = document.createElement('li');
     li.innerHTML = '<span class="pt"></span><span class="pn"></span><button data-a="load">불러오기</button><button data-a="del" title="삭제">✕</button>';
     li.querySelector('.pt').textContent = item.name;
+    li.classList.toggle('linked', item.name === layoutLink);
     const labels = item.desks.map((n, i) => (n ? `${i + 1} ${n}` : `${i + 1}`));
     li.querySelector('.pn').textContent = `데스크탑 ${item.desks.length}개 (${labels.join(', ')}) · ${fmtTime(item.saved_at)}`;
     li.querySelector('[data-a="load"]').onclick = () => loadLayout(item.name);
     li.querySelector('[data-a="del"]').onclick = async () => {
       if (!confirm(`저장된 구성 '${item.name}'을(를) 삭제할까요?`)) return;
       try { await api('DELETE', `/layouts/${enc(item.name)}`); } catch (e) { return toast(e.message); }
+      if (item.name === layoutLink) setLink(null);
       loadLayouts();
     };
     ul.appendChild(li);
@@ -905,6 +973,7 @@ async function loadLayouts() {
 
 function openLayouts() {
   $('layoutname').value = '';
+  renderLinkStatus();
   $('layoutdlg').showModal();
   loadLayouts();
 }
@@ -919,7 +988,8 @@ async function saveLayout(name) {
   } catch (e) {
     return toast(e.message, 5000);
   }
-  toast(`현재 데스크탑 구성을 '${name}'(으)로 저장했습니다`);
+  setLink(name);
+  toast(`현재 데스크탑 구성을 '${name}'(으)로 저장했습니다 · 이후 변경은 자동 저장`, 4000);
   $('layoutname').value = '';
   loadLayouts();
 }
@@ -934,9 +1004,17 @@ async function loadLayout(name) {
   }
   await refresh();
   const missing = applyDesks(data.desks || [], data.deskIdx || 0);
+  setLink(name);
   $('layoutdlg').close();
-  toast(missing.length ? `'${name}' 구성을 불러왔습니다 (없는 세션 제외: ${missing.join(', ')})` : `'${name}' 구성을 불러왔습니다`, 5000);
+  const msg = missing.length ? `'${name}' 구성을 불러왔습니다 (없는 세션 제외: ${missing.join(', ')})` : `'${name}' 구성을 불러왔습니다`;
+  toast(`${msg} · 이후 변경은 자동 저장`, 5000);
 }
+
+$('layoutunlink').onclick = () => {
+  setLink(null);
+  toast('연결을 끊었습니다 · 더 이상 자동 저장하지 않습니다');
+  loadLayouts();
+};
 
 $('layoutform').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -997,8 +1075,11 @@ function renderDesks() {
   box.appendChild(add);
   const more = document.createElement('button');
   more.className = 'desk add';
-  more.textContent = '⋯';
-  more.title = '데스크탑 구성 저장/불러오기';
+  more.textContent = layoutLink ? `⋯ ${layoutLink}` : '⋯';
+  more.classList.toggle('linked', !!layoutLink);
+  more.title = layoutLink
+    ? `'${layoutLink}' 구성에 연결됨 · 변경 사항 자동 저장${linkSavedAt ? ` (마지막 저장 ${new Date(linkSavedAt).toLocaleTimeString('ko-KR')})` : ''}`
+    : '데스크탑 구성 저장/불러오기';
   more.onclick = openLayouts;
   box.appendChild(more);
 }
@@ -3000,6 +3081,11 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
   const exists = (n) => sessions.some((s) => s.name === n);
   const saved = LS.get('desks', null) || [{ name: '', tree: LS.get('layout', null), active: LS.get('activeTab', null) }];
   applyDesks(saved, LS.get('deskIdx', 0), LS.get('openTabs', []));
+  if (layoutLink) {
+    clearTimeout(linkTimer);
+    linkTimer = null;
+    linkSent = JSON.stringify(layoutBody());
+  }
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);
