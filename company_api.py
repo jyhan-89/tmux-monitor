@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import commands
+import yaml
 import launcher
 import models
 import push
@@ -147,6 +148,18 @@ def transition(division: str, feature: str, body: Transition, _: dict = Depends(
     return commands.put("transition", division=division, feature=feature, to=body.to, reason=body.reason)
 
 
+@router.get("/model")
+def model(_: dict = Depends(tokens.require("company.read"))):
+    out = {}
+    for k in KINDS:
+        p = kind_path(k)
+        try:
+            out[k] = yaml.safe_load(p.read_text()) if p.exists() else None
+        except yaml.YAMLError:
+            out[k] = None
+    return out
+
+
 @router.get("/{kind}")
 def get_kind(kind: str, _: dict = Depends(tokens.require("company.read"))):
     check_kind(kind)
@@ -156,6 +169,56 @@ def get_kind(kind: str, _: dict = Depends(tokens.require("company.read"))):
 
 class Definition(BaseModel):
     text: str
+
+
+class Op(BaseModel):
+    path: list[str | int]
+    value: object = None
+    delete: bool = False
+
+
+class Patch(BaseModel):
+    ops: list[Op]
+
+
+def apply_op(data: dict, op: Op) -> None:
+    if not op.path:
+        raise HTTPException(400, "path가 비어 있습니다")
+    cur = data
+    for key in op.path[:-1]:
+        if isinstance(cur, dict):
+            cur = cur.setdefault(key, {})
+        elif isinstance(cur, list) and isinstance(key, int) and 0 <= key < len(cur):
+            cur = cur[key]
+        else:
+            raise HTTPException(400, f"경로를 찾을 수 없습니다: {op.path}")
+    last = op.path[-1]
+    if not isinstance(cur, (dict, list)):
+        raise HTTPException(400, f"경로를 찾을 수 없습니다: {op.path}")
+    if op.delete:
+        if isinstance(cur, dict):
+            cur.pop(last, None)
+        elif isinstance(last, int) and 0 <= last < len(cur):
+            cur.pop(last)
+    elif isinstance(cur, dict):
+        cur[last] = op.value
+    elif isinstance(last, int) and 0 <= last < len(cur):
+        cur[last] = op.value
+    else:
+        raise HTTPException(400, f"경로를 찾을 수 없습니다: {op.path}")
+
+
+@router.patch("/{kind}")
+def patch_kind(kind: str, body: Patch, who: dict = Depends(tokens.require("company.write"))):
+    check_kind(kind)
+    p = kind_path(kind)
+    if not p.exists():
+        raise HTTPException(404, f"{kind}.yaml이 없습니다")
+    data = yaml.safe_load(p.read_text()) or {}
+    for op in body.ops:
+        apply_op(data, op)
+    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120)
+    return put_kind(kind, Definition(text=text), who)
 
 
 @router.put("/{kind}")

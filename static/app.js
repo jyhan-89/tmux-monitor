@@ -555,6 +555,7 @@ async function loadInboxBadge() {
       return;
     }
     $('inboxbtn').hidden = !companyReady;
+    $('graphbtn').hidden = !companyReady;
     if (!companyReady) return;
   }
   try {

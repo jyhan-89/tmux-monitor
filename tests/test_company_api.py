@@ -65,3 +65,23 @@ def test_unknown_kind_and_auth(client):
     h = {"Authorization": f"Bearer {orch}"}
     assert client.get("/api/company/org", headers=h).status_code == 200
     assert client.put("/api/company/org", json={"text": ""}, headers=h).status_code == 403
+
+
+def test_model_and_patch(client):
+    for k in ("org", "process", "documents"):
+        put(client, k, (SAMPLE / f"{k}.yaml").read_text())
+    m = client.get("/api/company/model").json()
+    assert m["org"]["divisions"]["mw"]["depts"]["impl"]["members"]["count"] == 2
+    r = client.patch("/api/company/org", json={"ops": [
+        {"path": ["divisions", "mw", "depts", "impl", "members", "model"], "value": "opus"},
+        {"path": ["roles", "impl", "can_edit"], "value": ["src/**"]},
+    ]})
+    assert r.status_code == 200, r.text
+    m = client.get("/api/company/model").json()
+    assert m["org"]["divisions"]["mw"]["depts"]["impl"]["members"]["model"] == "opus"
+    assert m["org"]["roles"]["impl"]["can_edit"] == ["src/**"]
+    r = client.patch("/api/company/process", json={"ops": [
+        {"path": ["templates", "feature_dev", "nodes", "review", "on_fail"], "delete": True}]})
+    assert r.status_code == 400 and r.json()["detail"]["issues"][0]["rule"] == "on_fail"
+    assert "on_fail" in client.get("/api/company/model").json()["process"]["templates"]["feature_dev"]["nodes"]["review"]
+    assert client.patch("/api/company/org", json={"ops": [{"path": ["roles", "impl", "allowed_tools", 99], "value": "x"}]}).status_code == 400

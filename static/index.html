@@ -14,6 +14,7 @@
 <link rel="icon" href="static/icons/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.min.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="stylesheet" href="static/graph.css">
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
 </head>
@@ -45,6 +46,7 @@
     <div id="bar">
       <button id="menu" title="세션 목록 (열기/닫기)">☰</button>
       <button id="inboxbtn" title="결재함 · 진행 중인 기능" hidden>📝<span id="inboxbadge" hidden></span></button>
+      <button id="graphbtn" title="조직도 · 프로세스" hidden>🏢</button>
       <button id="layoutchip" class="none" title="데스크탑 구성"><span class="lcicon">📁</span><span class="lcname">구성 없음</span><span class="lcdot"></span></button>
       <div id="desks"></div>
       <div id="tabs"></div>
@@ -57,6 +59,17 @@
     </div>
     <div id="winbar" hidden></div>
 
+    <section id="graph" hidden>
+      <div class="ghead">
+        <button class="gtab on" data-view="org">조직도</button>
+        <button class="gtab" data-view="process">프로세스</button>
+        <select id="gdivsel" title="본부" hidden></select>
+        <select id="ginstsel" title="인스턴스" hidden></select>
+        <span id="glegend"></span>
+        <button id="gclose" title="터미널로">닫기</button>
+      </div>
+      <div class="gbody"><div id="gcanvas"></div><aside id="gpanel" hidden></aside></div>
+    </section>
     <div id="term"><div id="empty">세션 목록에서 세션을 선택하면 접속합니다</div><div id="paneholder"></div></div>
 
     <div id="snippets" hidden></div>
@@ -246,5 +259,6 @@
 <div id="ctxmenu" hidden></div>
 <div id="toast" hidden></div>
 <script src="static/app.js"></script>
+<script src="static/graph.js"></script>
 </body>
 </html>

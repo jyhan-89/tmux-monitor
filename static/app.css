@@ -60,7 +60,7 @@ aside header button { padding:4px 8px; }
 .badge.st-waiting { background:rgba(240,179,90,.15); animation:pulse 1.4s infinite; }
 @keyframes pulse { 50% { opacity:.55; } }
 
-main { flex:1; display:flex; flex-direction:column; min-width:0; }
+main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
 #bar { padding:6px 8px; border-bottom:1px solid var(--line); display:flex; gap:6px; align-items:center; }
 #bar > button { flex:none; padding:4px 9px; }
 #desks { flex:none; display:flex; gap:3px; align-items:center; }
