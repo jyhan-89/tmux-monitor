@@ -6,7 +6,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+import launcher
 import models
+import push
+import sessions_meta
+import tmuxctl
 import tokens
 
 log = logging.getLogger("tmux-web")
@@ -63,6 +67,35 @@ def summary(_: dict = Depends(tokens.require("company.read"))):
     except models.DefinitionError as e:
         issues = [i.as_dict() for i in e.issues]
     return {"exists": {k: k in texts for k in KINDS}, "complete": len(texts) == len(KINDS), "issues": issues}
+
+
+@router.get("/sessions")
+def role_sessions(_: dict = Depends(tokens.require("company.read"))):
+    metas = sessions_meta.all_meta()
+    out = []
+    for s in tmuxctl.list_sessions():
+        meta = metas.get(s["name"])
+        if not meta:
+            continue
+        st = push.status.get(s["name"], {})
+        out.append({"name": s["name"], "meta": meta, "state": st.get("state", ""), "source": st.get("source", "")})
+    return out
+
+
+class Launch(BaseModel):
+    division: str
+    dept: str
+    role: str
+    index: str | None = None
+    feature: str = ""
+
+
+@router.post("/sessions")
+def launch_session(body: Launch, _: dict = Depends(tokens.require("sessions.launch"))):
+    try:
+        return launcher.launch(body.division, body.dept, body.role, body.index, body.feature)
+    except (launcher.LaunchError, ValueError) as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("/{kind}")

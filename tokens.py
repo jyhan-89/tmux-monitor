@@ -14,7 +14,7 @@ LOOPBACK = {"127.0.0.1", "::1"}
 HEADER = "authorization"
 
 SCOPES: dict[str, set[str]] = {
-    "orchestrator": {"company.read", "control", "directives.manage", "sessions.meta", "history.read", "approvals.manage"},
+    "orchestrator": {"company.read", "control", "directives.manage", "sessions.meta", "sessions.launch", "history.read", "approvals.manage"},
     "hook": {"event"},
     "session": {"directives.self"},
 }
@@ -70,21 +70,29 @@ def issue(role: str, session: str | None = None) -> str:
     return token
 
 
-def hook_token_file() -> Path:
-    return secrets_dir() / "hook.token"
+def token_file(role: str) -> Path:
+    return secrets_dir() / f"{role}.token"
 
 
-def ensure_hook_token() -> str:
-    f = hook_token_file()
+def ensure_token(role: str) -> str:
+    f = token_file(role)
     if f.exists():
         token = f.read_text().strip()
         if lookup(token):
             return token
-    token = issue("hook")
+    token = issue(role)
     fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as out:
         out.write(token + "\n")
     return token
+
+
+def hook_token_file() -> Path:
+    return token_file("hook")
+
+
+def ensure_hook_token() -> str:
+    return ensure_token("hook")
 
 
 def lookup(token: str | None) -> dict | None:

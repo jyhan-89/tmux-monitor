@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter, Depends
 
 import history
+import launcher
 import push
 import tmuxctl
 import tokens
@@ -73,3 +74,10 @@ def api_stop_all(who: dict = Depends(tokens.require("control"))):
 @router.post("/resume")
 def api_resume(who: dict = Depends(tokens.require("control"))):
     return {"resumed": resume(who["role"])}
+
+
+@router.post("/wake/{session}")
+def api_wake(session: str, _: dict = Depends(tokens.require("control"))):
+    if stopped() is not None:
+        return {"woken": False, "reason": "stopped"}
+    return {"woken": launcher.wake(session)}

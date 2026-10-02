@@ -39,12 +39,12 @@ roles:
     cannot_edit: ["src/**", "gen/**", "**/*.arxml"]
   impl:
     prompt: prompts/impl.md
-    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push origin feat/*)", "Bash(ctest:*)", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push origin feat/*)", "Bash(ctest:*)", "Bash(directive:*)"]
     can_edit: ["src/**", "test/**"]
     cannot_edit: ["gen/**", "**/*.arxml", "coord/spec.md"]
   reviewer:
     prompt: prompts/reviewer.md
-    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(directive:*)"]
     can_edit: ["coord/review/**"]
   standards_owner:
     prompt: prompts/standards_owner.md
@@ -52,7 +52,7 @@ roles:
     can_edit: ["coord/standards.md"]
   standards_checker:
     prompt: prompts/standards_checker.md
-    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(directive:*)"]
     can_edit: ["coord/standards-check/**"]
   integrator:
     prompt: prompts/integrator.md
@@ -60,11 +60,11 @@ roles:
     can_edit: ["src/**", "test/**"]
   sil:
     prompt: prompts/sil.md
-    allowed_tools: ["Read", "Grep", "Glob", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)", "Bash(directive:*)"]
     can_edit: ["reports/**"]
   analysis:
     prompt: prompts/analysis.md
-    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(directive:*)"]
+    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(directive:*)"]
     can_edit: ["coord/issue/**"]
   ops:
     prompt: prompts/ops.md
