@@ -1,0 +1,7 @@
+[Unit]
+Description=tmux web monitor NAS sync
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dev_monitor
+ExecStart=%h/dev_monitor/.venv/bin/python ops/sync_nas.py

@@ -1,5 +1,9 @@
+import os
 import re
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -43,10 +47,26 @@ def handle(session: str, event: str, data: dict) -> dict:
         for m in GIT.finditer(command):
             recorded.append(history.record({"type": f"git_{m.group(1)}", "session": session, "source": "hook",
                                             "command": command[:300]}))
+    if any(e["type"] in ("git_merge", "git_push") for e in recorded) and "main" in str((data.get("tool_input") or {}).get("command", "")):
+        trigger_sync()
     node = data.get("node")
     if isinstance(node, str) and node and sessions_meta.get(session) is not None:
         sessions_meta.update(session, node=node)
     return {"state": state, "recorded": len(recorded)}
+
+
+_last_sync = 0.0
+SYNC_GAP = 60.0
+
+
+def trigger_sync() -> bool:
+    global _last_sync
+    if not os.environ.get("TMUX_WEB_NAS_ROOT") or time.time() - _last_sync < SYNC_GAP:
+        return False
+    _last_sync = time.time()
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "ops" / "sync_nas.py")],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return True
 
 
 class Event(BaseModel):

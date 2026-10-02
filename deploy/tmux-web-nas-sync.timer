@@ -1,0 +1,9 @@
+[Unit]
+Description=tmux web monitor NAS sync (hourly)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

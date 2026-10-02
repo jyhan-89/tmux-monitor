@@ -89,6 +89,16 @@ def api_wake(session: str, body: Wake | None = None, _: dict = Depends(tokens.re
     return {"woken": launcher.wake(session, (body or Wake()).text)}
 
 
+class Notice(BaseModel):
+    title: str
+    body: str = ""
+
+
+@router.post("/notify")
+def api_notify(body: Notice, _: dict = Depends(tokens.require("control"))):
+    return {"sent": push.send_all(body.title, body.body)}
+
+
 @router.post("/restored")
 def api_restored(_: dict = Depends(tokens.require("control"))):
     history.record({"type": "session_start", "session": "*", "source": "tmux-persist"})
