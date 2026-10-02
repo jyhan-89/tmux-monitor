@@ -429,6 +429,7 @@ def test_commands_start_transition_restored(env):
     commands.put("restored")
     orch.tick()
     assert "inbox 지시서 상태 확인 후 계속" in server.wake_texts
+    assert sorted(server.restarted) == ["mw-impl-impl-proxy", "mw-impl-impl-skeleton", "mw-quality-reviewer"]
     commands.put("transition", division="mw", feature="svc_a", to="nowhere")
     orch.tick()
     assert orchestrator.load("mw", "svc_a")["node"] == "review"

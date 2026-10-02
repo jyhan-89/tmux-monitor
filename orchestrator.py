@@ -458,7 +458,9 @@ class Orchestrator:
     def recover(self, company, sessions, inst, ds) -> None:
         for d in ds.values():
             name = d["to"]
-            if name not in sessions:
+            if name in sessions:
+                self.server.restart(name)
+            else:
                 parsed = name.split("-")
                 self.server.launch(parsed[0], parsed[1], parsed[2], parsed[3] if len(parsed) > 3 else None, inst["feature"])
             self.server.deliver(name)

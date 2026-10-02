@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 DEFAULT_PROCESSES = "vi vim nvim nano emacs man less more tail top htop btop watch ssh claude"
@@ -365,7 +366,23 @@ def cmd_restore(arg=None):
                 print(f"failed to restore session {sess['name']!r}: {e}", file=sys.stderr)
     print(f"restored {len(restored)} sessions from {snap.name}"
           + (f" (skipped existing: {', '.join(skipped)})" if skipped else ""))
+    if restored:
+        notify_restored()
     return 0
+
+
+def notify_restored():
+    config = Path(os.environ.get("TMUX_WEB_CONFIG") or Path.home() / ".config/tmux-web")
+    token_file = config / "company" / "secrets" / "orchestrator.token"
+    if not token_file.is_file():
+        return
+    url = os.environ.get("TMUX_WEB_URL", "http://127.0.0.1:8765/dev").rstrip("/") + "/api/control/restored"
+    req = urllib.request.Request(url, data=b"", method="POST",
+                                 headers={"Authorization": f"Bearer {token_file.read_text().strip()}"})
+    try:
+        urllib.request.urlopen(req, timeout=3).close()
+    except OSError as e:
+        print(f"tmux-web restore notice failed: {e}", file=sys.stderr)
 
 
 def cmd_list():
