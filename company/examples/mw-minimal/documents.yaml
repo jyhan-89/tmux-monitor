@@ -1,0 +1,18 @@
+version: 1
+documents:
+  coord/spec.md:          {owner: architect}
+  coord/design/*.md:      {owner: feature_design}
+  coord/standards.md:     {owner: standards_owner}
+  coord/review/*.md:      {owner: reviewer}
+  coord/issue/*.md:       {owner: analysis}
+  gen/**:                 {owner: architect, regenerate_only: true}
+  "**/*.arxml":           {owner: architect}
+
+directives:
+  node:       {from: orchestrator,      to: any}
+  task:       {from: feature_design,    to: impl}
+  review:     {from: reviewer,          to: analysis}
+  std_check:  {from: standards_checker, to: [feature_design, analysis]}
+  issue:      {from: analysis,          to: feature_design}
+  merge:      {from: orchestrator,      to: integrator}
+  status:     {from: any,               to: ops}

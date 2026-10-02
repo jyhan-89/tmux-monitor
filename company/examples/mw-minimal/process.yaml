@@ -1,0 +1,61 @@
+version: 1
+templates:
+  feature_dev:
+    start: design
+    nodes:
+      design:
+        role: feature_design
+        gate: gates/{profile}/design_check.sh
+        next: implement
+        on_fail: escalate
+      implement:
+        role: impl
+        parallel: true
+        retry: 2
+        gate: gates/{profile}/unit_test.sh
+        next: review
+        on_fail: analyze
+      review:
+        role: reviewer
+        pre_gate: gates/common/ownership_check.sh
+        gate: gates/common/review_approved.sh
+        next: std_check_impl
+        on_fail: analyze
+      std_check_impl:
+        role: standards_checker
+        gate: gates/{profile}/impl_std_check.sh
+        next: sil1
+        on_fail: analyze
+      sil1:
+        role: sil
+        gate: gates/{profile}/sil_feature.sh
+        next: integrate
+        on_fail: analyze
+      integrate:
+        role: integrator
+        requires_approval: true
+        pre_gate: gates/common/ownership_check.sh
+        gate: gates/common/main_build_ok.sh
+        next: sil2
+        on_fail: analyze
+      sil2:
+        role: sil
+        gate: gates/{profile}/sil_system.sh
+        next: done
+        on_fail: analyze
+      analyze:
+        role: analysis
+        next: design
+        on_fail: escalate
+        loop:
+          counter_by: source_node
+          max: {implement: 2, review: 3, std_check_impl: 3, sil1: 3, integrate: 2, sil2: 2}
+          on_exceed: escalate
+      escalate:
+        type: approval
+        options: [redesign, drop, override]
+      done:
+        type: terminal
+    limits:
+      node_timeout_h: 24
+      ack_timeout_h: 2

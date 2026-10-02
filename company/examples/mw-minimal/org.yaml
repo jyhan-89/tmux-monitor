@@ -1,0 +1,72 @@
+version: 1
+shared:
+  system_architect: {role: architect, model: opus, scope: system}
+  standards_owner:  {role: standards_owner, model: opus}
+  standards_pool:   {role: standards_checker, model: sonnet, count: 1}
+  analysis:         {role: analysis, model: opus, count: 1}
+  ops:              {role: ops, model: haiku, always_on: true}
+
+divisions:
+  mw:
+    name: 미들웨어 본부
+    profile: adaptive
+    template: feature_dev
+    repo: ""
+    depts:
+      design:
+        members: {role: feature_design, model: opus, count: 1}
+        rules: prompts/design-rules.md
+      impl:
+        members: {role: impl, model: sonnet, count: 2}
+        layers: [skeleton, proxy]
+        rules: prompts/impl-rules.md
+      quality: {members: {role: reviewer, model: sonnet, count: 1}}
+      integ:   {members: {role: integrator, model: sonnet, count: 1}}
+      verify:  {members: {role: sil, model: haiku, count: 1}}
+
+profiles:
+  adaptive: {standards: [ap, cpp14], gates_dir: gates/adaptive}
+
+roles:
+  architect:
+    prompt: prompts/architect.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(directive:*)"]
+    can_edit: ["coord/spec.md", "gen/**", "**/*.arxml"]
+  feature_design:
+    prompt: prompts/feature_design.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(git add:*)", "Bash(git commit:*)", "Bash(directive:*)"]
+    can_edit: ["coord/design/**"]
+    cannot_edit: ["src/**", "gen/**", "**/*.arxml"]
+  impl:
+    prompt: prompts/impl.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push origin feat/*)", "Bash(ctest:*)", "Bash(directive:*)"]
+    can_edit: ["src/**", "test/**"]
+    cannot_edit: ["gen/**", "**/*.arxml", "coord/spec.md"]
+  reviewer:
+    prompt: prompts/reviewer.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(directive:*)"]
+    can_edit: ["coord/review/**"]
+  standards_owner:
+    prompt: prompts/standards_owner.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash(directive:*)"]
+    can_edit: ["coord/standards.md"]
+  standards_checker:
+    prompt: prompts/standards_checker.md
+    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(directive:*)"]
+    can_edit: ["coord/standards-check/**"]
+  integrator:
+    prompt: prompts/integrator.md
+    allowed_tools: ["Read", "Grep", "Glob", "Edit", "Bash(git merge:*)", "Bash(git push origin main)", "Bash(git checkout:*)", "Bash(directive:*)"]
+    can_edit: ["src/**", "test/**"]
+  sil:
+    prompt: prompts/sil.md
+    allowed_tools: ["Read", "Grep", "Glob", "Bash(directive:*)"]
+    can_edit: ["reports/**"]
+  analysis:
+    prompt: prompts/analysis.md
+    allowed_tools: ["Read", "Grep", "Glob", "Write", "Bash(directive:*)"]
+    can_edit: ["coord/issue/**"]
+  ops:
+    prompt: prompts/ops.md
+    allowed_tools: ["Read", "Bash(git worktree:*)", "Bash(git branch:*)", "Bash(git tag:*)", "Bash(rsync:*)", "Bash(directive:*)"]
+    cannot_edit: ["src/**"]
