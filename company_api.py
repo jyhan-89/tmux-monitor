@@ -20,6 +20,37 @@ router = APIRouter(prefix="/api/company")
 KINDS = tuple(models.PARSERS)
 
 
+_org_cache: dict = {"mtime": None, "org": None}
+
+
+def current_org() -> models.Org | None:
+    p = kind_path("org")
+    try:
+        mtime = p.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+    if _org_cache["mtime"] != mtime:
+        try:
+            _org_cache["org"] = models.parse_org(p.read_text())
+        except models.DefinitionError:
+            _org_cache["org"] = None
+        _org_cache["mtime"] = mtime
+    return _org_cache["org"]
+
+
+def role_known(parsed: dict) -> bool:
+    org = current_org()
+    if not org or parsed["role"] not in org.roles:
+        return False
+    div = org.divisions.get(parsed["division"])
+    if not div:
+        return False
+    if parsed["dept"] == "shared":
+        return parsed["role"] in org.shared_roles()
+    dept = div.depts.get(parsed["dept"])
+    return bool(dept) and any(m.role == parsed["role"] for m in dept.all_members())
+
+
 def kind_path(kind: str) -> Path:
     return tokens.company_dir() / f"{kind}.yaml"
 

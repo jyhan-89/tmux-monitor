@@ -250,7 +250,7 @@ def api_version():
 @api.get("/sessions")
 def api_sessions():
     sessions = list_sessions()
-    sessions_meta.adopt([s["name"] for s in sessions])
+    sessions_meta.adopt([s["name"] for s in sessions], company_api.role_known)
     group_of = store.group_of()
     metas = sessions_meta.all_meta()
     for s in sessions:

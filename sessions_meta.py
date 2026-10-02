@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import store
 from tmuxctl import parse_role_session
 
@@ -37,13 +39,15 @@ def forget(name: str) -> None:
         store.save(FILE, data)
 
 
-def adopt(names: list[str]) -> bool:
+def adopt(names: list[str], known: Callable[[dict], bool] = lambda parsed: False) -> bool:
     data = all_meta()
     grouped = store.group_of()
     changed = False
     for name in names:
         parsed = parse_role_session(name)
         if not parsed or data.get(name, {}).get("grouped"):
+            continue
+        if name not in data and not known(parsed):
             continue
         meta = data.setdefault(name, {})
         for k in ("division", "dept", "role"):
