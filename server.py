@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 import termios
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -807,6 +808,65 @@ def api_persist_restore(body: PersistRestore):
 
 class Config(BaseModel):
     snippets: list[str]
+
+
+LAYOUTS_FILE = "layouts.json"
+
+
+def valid_layout_name(name: str) -> str:
+    name = name.strip()
+    if not name or len(name) > 40 or "/" in name:
+        raise HTTPException(400, "구성 이름은 1~40자, '/' 없이 입력하세요")
+    return name
+
+
+@api.get("/layouts")
+def api_layouts():
+    items = []
+    for name, v in store.load(LAYOUTS_FILE, {}).items():
+        desks = v.get("desks", [])
+        items.append({
+            "name": name,
+            "saved_at": v.get("saved_at", 0),
+            "desks": [d.get("name", "") for d in desks],
+        })
+    return sorted(items, key=lambda x: -x["saved_at"])
+
+
+@api.get("/layouts/{name}")
+def api_layout(name: str):
+    v = store.load(LAYOUTS_FILE, {}).get(name)
+    if v is None:
+        raise HTTPException(404, "저장된 구성이 없습니다")
+    return v
+
+
+class LayoutBody(BaseModel):
+    desks: list[dict]
+    deskIdx: int = 0
+
+
+@api.put("/layouts/{name}")
+def api_save_layout(name: str, body: LayoutBody):
+    name = valid_layout_name(name)
+    if not body.desks or len(body.desks) > 30:
+        raise HTTPException(400, "데스크탑은 1~30개여야 합니다")
+    data = {"desks": body.desks, "deskIdx": body.deskIdx, "saved_at": int(time.time())}
+    if len(json.dumps(data)) > 300_000:
+        raise HTTPException(413, "구성이 너무 큽니다")
+    layouts = store.load(LAYOUTS_FILE, {})
+    layouts[name] = data
+    store.save(LAYOUTS_FILE, layouts)
+    return {"ok": True}
+
+
+@api.delete("/layouts/{name}")
+def api_delete_layout(name: str):
+    layouts = store.load(LAYOUTS_FILE, {})
+    if layouts.pop(name, None) is None:
+        raise HTTPException(404, "저장된 구성이 없습니다")
+    store.save(LAYOUTS_FILE, layouts)
+    return {"ok": True}
 
 
 @api.get("/config")

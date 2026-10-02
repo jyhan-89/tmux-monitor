@@ -842,6 +842,108 @@ function moveTabToDesk(name, i) {
   toast(`${name} → 데스크탑 ${i + 1}`);
 }
 
+function rawTabNames(t) {
+  if (!t || typeof t !== 'object') return [];
+  if (t.t === 'leaf') return Array.isArray(t.tabs) ? t.tabs : [t.name];
+  return (t.kids || []).flatMap(rawTabNames);
+}
+
+function applyDesks(saved, idx, extra = []) {
+  const want = new Set([...extra, ...saved.flatMap((d) => rawTabNames(d.tree))].filter((n) => typeof n === 'string'));
+  const missing = [...want].filter((n) => !sessions.some((s) => s.name === n));
+  for (const name of want) {
+    if (!missing.includes(name) && !conns.has(name)) conns.set(name, createConn(name));
+  }
+  desks = saved.map((d) => ({ name: String(d.name || '').slice(0, 20), tree: sanitizeTree(d.tree), active: d.active }));
+  if (!desks.length) desks = [{ name: '', tree: null, active: null }];
+  deskIdx = Math.min(Math.max(0, +idx || 0), desks.length - 1);
+  tree = desks[deskIdx].tree;
+  activeName = conns.has(desks[deskIdx].active) ? desks[deskIdx].active : null;
+  for (const name of [...conns.keys()]) {
+    if (!extra.includes(name) && !desks.some((d) => leaves(d.tree).some((g) => g.tabs.includes(name)))) disposeConn(name);
+  }
+  layoutKey = '';
+  layout();
+  saveTabs();
+  renderList();
+  return missing;
+}
+
+const fmtTime = (t) => new Date(t * 1000).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+
+async function loadLayouts() {
+  let list;
+  try {
+    list = await api('GET', '/layouts');
+  } catch (e) {
+    return toast(e.message);
+  }
+  const ul = $('layoutlist');
+  ul.innerHTML = '';
+  for (const item of list) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="pt"></span><span class="pn"></span><button data-a="load">불러오기</button><button data-a="del" title="삭제">✕</button>';
+    li.querySelector('.pt').textContent = item.name;
+    const labels = item.desks.map((n, i) => (n ? `${i + 1} ${n}` : `${i + 1}`));
+    li.querySelector('.pn').textContent = `데스크탑 ${item.desks.length}개 (${labels.join(', ')}) · ${fmtTime(item.saved_at)}`;
+    li.querySelector('[data-a="load"]').onclick = () => loadLayout(item.name);
+    li.querySelector('[data-a="del"]').onclick = async () => {
+      if (!confirm(`저장된 구성 '${item.name}'을(를) 삭제할까요?`)) return;
+      try { await api('DELETE', `/layouts/${enc(item.name)}`); } catch (e) { return toast(e.message); }
+      loadLayouts();
+    };
+    ul.appendChild(li);
+  }
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'pn';
+    li.textContent = '저장된 구성이 없습니다';
+    ul.appendChild(li);
+  }
+  return list;
+}
+
+function openLayouts() {
+  $('layoutname').value = '';
+  $('layoutdlg').showModal();
+  loadLayouts();
+}
+
+async function saveLayout(name) {
+  saveTabs();
+  const list = await api('GET', '/layouts').catch(() => []);
+  if (list.some((x) => x.name === name) && !confirm(`'${name}' 구성이 이미 있습니다. 덮어쓸까요?`)) return;
+  const body = { desks: desks.map((d) => ({ name: d.name, tree: d.tree, active: d.active })), deskIdx };
+  try {
+    await api('PUT', `/layouts/${enc(name)}`, body);
+  } catch (e) {
+    return toast(e.message, 5000);
+  }
+  toast(`현재 데스크탑 구성을 '${name}'(으)로 저장했습니다`);
+  $('layoutname').value = '';
+  loadLayouts();
+}
+
+async function loadLayout(name) {
+  if (!confirm(`'${name}' 구성을 불러올까요? 지금 데스크탑 구성은 이 구성으로 바뀝니다.`)) return;
+  let data;
+  try {
+    data = await api('GET', `/layouts/${enc(name)}`);
+  } catch (e) {
+    return toast(e.message);
+  }
+  await refresh();
+  const missing = applyDesks(data.desks || [], data.deskIdx || 0);
+  $('layoutdlg').close();
+  toast(missing.length ? `'${name}' 구성을 불러왔습니다 (없는 세션 제외: ${missing.join(', ')})` : `'${name}' 구성을 불러왔습니다`, 5000);
+}
+
+$('layoutform').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('layoutname').value.trim();
+  if (name) saveLayout(name);
+});
+
 function deskState(d, i) {
   const names = i === deskIdx ? leaves().flatMap((g) => g.tabs) : deskNames(d);
   const states = names.map((n) => sessions.find((s) => s.name === n)?.state);
@@ -867,6 +969,7 @@ function renderDesks() {
       openCtx(e.clientX, e.clientY, [
         { label: '이 데스크탑으로 이동', run: () => switchDesk(i) },
         { label: '이름 바꾸기', run: () => renameDesk(i) },
+        { label: '데스크탑 구성 저장/불러오기', run: openLayouts },
         '-',
         { label: '데스크탑 삭제', danger: true, disabled: desks.length < 2, run: () => deleteDesk(i) },
       ]);
@@ -892,6 +995,12 @@ function renderDesks() {
   add.title = '새 데스크탑';
   add.onclick = addDesk;
   box.appendChild(add);
+  const more = document.createElement('button');
+  more.className = 'desk add';
+  more.textContent = '⋯';
+  more.title = '데스크탑 구성 저장/불러오기';
+  more.onclick = openLayouts;
+  box.appendChild(more);
 }
 
 function activate(name, focus = true) {
@@ -2890,18 +2999,7 @@ $('updateclose').onclick = () => { $('updatebar').hidden = true; };
   await refresh();
   const exists = (n) => sessions.some((s) => s.name === n);
   const saved = LS.get('desks', null) || [{ name: '', tree: LS.get('layout', null), active: LS.get('activeTab', null) }];
-  const rawNames = (t) => (!t || typeof t !== 'object' ? []
-    : t.t === 'leaf' ? (Array.isArray(t.tabs) ? t.tabs : [t.name]) : (t.kids || []).flatMap(rawNames));
-  const want = new Set([...LS.get('openTabs', []), ...saved.flatMap((d) => rawNames(d.tree))]);
-  for (const name of want) {
-    if (typeof name === 'string' && exists(name) && !conns.has(name)) conns.set(name, createConn(name));
-  }
-  desks = saved.map((d) => ({ name: String(d.name || ''), tree: sanitizeTree(d.tree), active: d.active }));
-  if (!desks.length) desks = [{ name: '', tree: null, active: null }];
-  deskIdx = Math.min(Math.max(0, +LS.get('deskIdx', 0) || 0), desks.length - 1);
-  tree = desks[deskIdx].tree;
-  activeName = conns.has(desks[deskIdx].active) ? desks[deskIdx].active : null;
-  layout();
+  applyDesks(saved, LS.get('deskIdx', 0), LS.get('openTabs', []));
   const target = new URLSearchParams(location.search).get('s');
   if (target) {
     history.replaceState(null, '', `${base}/`);

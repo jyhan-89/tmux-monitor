@@ -163,6 +163,19 @@
   </div>
 </dialog>
 
+<dialog id="layoutdlg">
+  <div class="dlghead">
+    <h2>데스크탑 구성 저장 / 불러오기</h2>
+    <button type="button" data-close>닫기</button>
+  </div>
+  <p class="hint">데스크탑 목록과 데스크탑별 분할 배치·탭을 서버에 저장합니다. 다른 기기나 다른 주소에서도 불러올 수 있습니다.</p>
+  <form id="layoutform" class="inline" style="margin-top:10px">
+    <input id="layoutname" placeholder="저장할 이름 (예: 평소, 빌드 작업)" maxlength="40" autocomplete="off">
+    <button class="primary">현재 구성 저장</button>
+  </form>
+  <ul id="layoutlist" class="plist"></ul>
+</dialog>
+
 <dialog id="persistdlg">
   <div class="dlghead">
     <h2>세션 저장 / 복원</h2>

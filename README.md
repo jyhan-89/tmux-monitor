@@ -87,6 +87,7 @@ open `http://localhost:8765/dev/setup` **in a browser on the server PC**.
 | Open a session | Click it in the list. It opens as a tab in the selected area |
 | Split the view | Drag a tab or a session from the list to an edge of the terminal area |
 | Desktops | Number buttons at the top to switch, ＋ to add, right-click to rename/delete, drop a tab on a number to move it |
+| Save/load desktop setups | ⋯ next to the desktop buttons. Stored on the server, so other devices and URLs can load them |
 | Session / group menu | Right-click in the list (phone: 📁 ✎ ✕ buttons) |
 | Type Korean | Type in the input box at the bottom, then Enter |
 | See earlier output | Mouse wheel / swipe up or down on a phone |
@@ -148,8 +149,9 @@ sudo tailscale serve --bg http://127.0.0.1:8765     # https://<machine>.<tailnet
 | `TMUX_WEB_TLS` | `~/.config/tmux-web/tls` | Self-signed certificate folder |
 | `TMUX_PERSIST_DIR` | `~/.local/share/tmux-persist` | Snapshot folder |
 
-`~/.config/tmux-web/` holds the account, login sessions, command buttons and groups, web push keys and
+`~/.config/tmux-web/` holds the account, login sessions, command buttons and groups, saved desktop setups, web push keys and
 subscriptions, and certificates. It is not part of the repository.
+The currently open desktop layout is stored in the browser (per URL).
 
 ## Administration
 
