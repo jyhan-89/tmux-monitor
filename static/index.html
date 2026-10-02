@@ -85,6 +85,7 @@
 
   <section id="files" hidden>
     <header class="fhead">
+      <button id="fback" title="목록으로" hidden>←</button>
       <div id="fcrumb"></div>
       <label class="fhidden" title="숨김 파일 보기"><input type="checkbox" id="fshowhidden">숨김</label>
       <button id="fmenu" title="새 파일, 새 폴더, 붙여넣기">⋯</button>
@@ -98,6 +99,15 @@
       <button data-act="insert">경로 넣기</button>
       <button data-act="all">전체</button>
       <button data-act="clear">취소</button>
+    </div>
+    <div id="ftools" hidden>
+      <span id="fname"></span>
+      <button id="fmdtoggle" hidden>원문</button>
+      <button id="fedit" hidden>수정</button>
+      <button id="fsave" class="primary" hidden title="저장 (Ctrl+S)">저장</button>
+      <button id="fcancel" hidden>취소</button>
+      <button id="finsert" title="입력창에 경로 넣기">경로 넣기</button>
+      <a id="fdownload" class="btn" download>내려받기</a>
     </div>
     <div id="fbody"></div>
   </section>

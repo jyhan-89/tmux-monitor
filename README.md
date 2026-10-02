@@ -20,7 +20,7 @@ The UI is in Korean.
 - **Split view**: drag a tab to split up/down/left/right, a tab bar per area, resize with the dividers
 - **Session management**: create (working folder, start command), rename, kill; switch and close tmux windows/panes
 - **Input**: input box for Korean (IME) text, buttons for frequently used commands, mobile keys (Esc, Ctrl, arrows, …)
-- **Files**: browse under the home folder, open Markdown and code as tabs in the split view, upload files. Editing, copy, move and delete are optional (off by default)
+- **Files**: browse under the home folder, view Markdown and code, upload files. Editing, copy, move and delete are optional (off by default)
 - **Copy**: selecting text by dragging in the terminal or file viewer copies it to the clipboard of the device you are using
 - **Notifications**: web push when a Claude task finishes or needs input (requires HTTPS)
 - **Save/restore sessions**: the tmux-persist add-on saves periodically and restores after a reboot
@@ -89,7 +89,7 @@ open `http://localhost:8765/dev/setup` **in a browser on the server PC**.
 | Type Korean | Type in the input box at the bottom, then Enter |
 | See earlier output | Mouse wheel / swipe up or down on a phone |
 | Copy | Select by dragging (inside Claude's screen, Shift+drag or the setting below) |
-| Browse files | 📂 at the top; clicking a file opens it as a tab in the selected area. Copy/move/delete via the explorer right-click menu (when edits are allowed) |
+| Browse files | 📂 at the top. Copy/move/delete via the right-click menu (when edits are allowed) |
 | Save/restore | 💾 above the session list |
 
 ### Copying from the Claude Code screen
