@@ -268,6 +268,13 @@ function sessionItem(s, inGroup, depth = 0) {
   } else {
     badge.remove();
   }
+  if (s.meta?.role) {
+    const rb = document.createElement('span');
+    rb.className = 'rolebadge';
+    rb.textContent = s.meta.node ? `${s.meta.role} · ${s.meta.node}` : s.meta.role;
+    rb.title = `${s.meta.division}.${s.meta.dept}.${s.meta.role}${s.meta.node ? ` · 노드 ${s.meta.node}` : ''}${s.state_source ? ` · 상태 출처 ${s.state_source}` : ''}`;
+    li.querySelector('.name').after(rb);
+  }
   const pv = li.querySelector('.preview');
   for (const line of s.preview || []) {
     const d = document.createElement('div');

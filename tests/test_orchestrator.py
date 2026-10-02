@@ -90,6 +90,9 @@ class FakeServer:
         self.wake_texts.append(text)
         return True
 
+    def set_node(self, session, node):
+        self.sessions[session].setdefault("meta", {})["node"] = node
+
     def restart(self, session):
         self.restarted.append(session)
         return {"name": session}
@@ -162,6 +165,7 @@ def test_happy_path_parallel_layers(env):
     body = next(iter(server.directives.values()))["body"]
     assert "feature: svc_a" in body and "svc-a 구현" in body
     assert set(server.woken) == set(server.sessions)
+    assert all(s["meta"]["node"] == "implement" for s in server.sessions.values())
     orch.tick()
     assert inst()["node"] == "implement"
     server.finish_all()

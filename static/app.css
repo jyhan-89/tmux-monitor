@@ -252,6 +252,7 @@ dialog.big[open] { display:flex; flex-direction:column; }
 
 #updatebar { position:fixed; top:calc(8px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); z-index:80; display:flex; align-items:center; gap:8px; padding:6px 8px 6px 14px; background:#2c3a4f; border:1px solid var(--accent); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.45); font-size:14px; }
 #updatebar[hidden] { display:none; }
+.rolebadge { flex:none; font-size:11px; padding:1px 6px; border-radius:4px; background:rgba(199,146,234,.14); color:var(--busy); max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #stopall { margin:6px 8px 0; padding:6px 10px; color:var(--err); border-color:rgba(240,113,120,.5); background:rgba(240,113,120,.08); font-weight:600; }
 #stopall:hover { border-color:var(--err); background:rgba(240,113,120,.18); }
 #stopall[hidden] { display:none; }

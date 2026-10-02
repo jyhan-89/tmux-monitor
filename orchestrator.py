@@ -67,6 +67,9 @@ class Server:
     def wake(self, session: str, text: str | None = None) -> bool:
         return self.call("POST", f"/control/wake/{session}", {"text": text} if text else None)["woken"]
 
+    def set_node(self, session: str, node: str) -> None:
+        self.call("PATCH", f"/company/sessions/{session}/meta", {"node": node})
+
     def restart(self, session: str) -> dict:
         return self.call("POST", f"/company/sessions/{session}/restart")
 
@@ -491,6 +494,7 @@ class Orchestrator:
                 index = "1" if count > 1 else None
             launched = self.server.launch(inst["division"], dept_key, node.role, index, inst["feature"])
             name = launched["name"]
+            self.server.set_node(name, node.id)
             d = self.server.send(dtype, name, node_body(company, inst, node, layer))
             if d["status"] == "queued":
                 self.server.deliver(name)

@@ -112,6 +112,17 @@ def launch_session(body: Launch, _: dict = Depends(tokens.require("sessions.laun
         raise HTTPException(400, str(e))
 
 
+class MetaUpdate(BaseModel):
+    node: str | None = None
+
+
+@router.patch("/sessions/{name}/meta")
+def update_meta(name: str, body: MetaUpdate, _: dict = Depends(tokens.require("sessions.meta"))):
+    if sessions_meta.get(name) is None:
+        raise HTTPException(404, "역할 세션이 아닙니다")
+    return sessions_meta.update(name, node=body.node)
+
+
 @router.post("/sessions/{name}/restart")
 def restart_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
     try:
