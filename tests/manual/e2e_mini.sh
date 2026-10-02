@@ -16,17 +16,18 @@ org = yaml.safe_load((sample / "org.yaml").read_text())
 org["divisions"]["mw"].update(template="mini", repo=str(w / "repo"))
 (w / "cfg/company/org.yaml").write_text(yaml.safe_dump(org, allow_unicode=True))
 (w / "cfg/company/documents.yaml").write_text((sample / "documents.yaml").read_text())
-(w / "cfg/company/process.yaml").write_text("""version: 1
+import os
+(w / "cfg/company/process.yaml").write_text(("""version: 1
 templates:
   mini:
     start: implement
     nodes:
       implement: {role: impl, parallel: true, retry: 1, gate: gates/common/has_new_commit.sh, next: review, on_fail: analyze}
-      review: {role: reviewer, gate: gates/common/review_approved.sh, next: done, on_fail: analyze}
+      review: {role: reviewer, gate: gates/common/review_approved.sh, next: done, on_fail: analyze, requires_approval: REVIEW_APPROVAL}
       analyze: {role: analysis, next: implement, on_fail: escalate, loop: {max: {implement: 1, review: 1}, on_exceed: escalate}}
       escalate: {type: approval, options: [redesign, drop]}
       done: {type: terminal}
-""")
+""").replace("REVIEW_APPROVAL", "true" if os.environ.get("E2E_APPROVAL") else "false"))
 PY
 export TMUX_TMPDIR="$TDIR" TMUX_WEB_CONFIG="$W/cfg" TMUX_WEB_AUTH="$W/cfg/auth.json" TMUX_WEB_DATA="$W/data" PORT
 export TMUX_WEB_CLAUDE_CMD="python3 $ROOT/tests/manual/fake_claude.py"
@@ -34,10 +35,15 @@ unset TMUX TMUX_PANE
 cd "$ROOT"
 setsid .venv/bin/python server.py > "$W/server.log" 2>&1 &
 SERVER=$!
-trap 'kill $SERVER 2>/dev/null; [ -S "$SOCK" ] && tmux -S "$SOCK" kill-server 2>/dev/null; rm -rf "$TDIR"' EXIT
+if [ -z "${E2E_KEEP:-}" ]; then
+  trap 'kill $SERVER 2>/dev/null; [ -S "$SOCK" ] && tmux -S "$SOCK" kill-server 2>/dev/null; rm -rf "$TDIR"' EXIT
+else
+  echo "KEEP server=$SERVER sock=$SOCK tdir=$TDIR"
+  printf 'testpass123\n' | TMUX_WEB_AUTH="$W/cfg/auth.json" .venv/bin/python auth.py tester >/dev/null 2>&1 || true
+fi
 for _ in $(seq 50); do curl -s -o /dev/null "localhost:$PORT/dev/login" && break; sleep 0.2; done
 .venv/bin/python orchestrator.py start mw svc_a --brief "svc-a 기능 구현"
-for i in $(seq 60); do
+for i in $(seq "${E2E_TICKS:-60}"); do
   .venv/bin/python orchestrator.py run --once 2>>"$W/orch.log"
   status=$(.venv/bin/python orchestrator.py list)
   echo "[$i] $status"

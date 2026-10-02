@@ -70,6 +70,18 @@ def summary(_: dict = Depends(tokens.require("company.read"))):
     return {"exists": {k: k in texts for k in KINDS}, "complete": len(texts) == len(KINDS), "issues": issues}
 
 
+@router.get("/divisions")
+def divisions(_: dict = Depends(tokens.require("company.read"))):
+    p = kind_path("org")
+    if not p.exists():
+        return []
+    try:
+        org = models.parse_org(p.read_text())
+    except models.DefinitionError:
+        return []
+    return [{"id": d.id, "name": d.name} for d in org.divisions.values()]
+
+
 @router.get("/sessions")
 def role_sessions(_: dict = Depends(tokens.require("company.read"))):
     metas = sessions_meta.all_meta()

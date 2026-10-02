@@ -44,6 +44,7 @@
   <main>
     <div id="bar">
       <button id="menu" title="세션 목록 (열기/닫기)">☰</button>
+      <button id="inboxbtn" title="결재함 · 진행 중인 기능" hidden>📝<span id="inboxbadge" hidden></span></button>
       <button id="layoutchip" class="none" title="데스크탑 구성"><span class="lcicon">📁</span><span class="lcname">구성 없음</span><span class="lcdot"></span></button>
       <div id="desks"></div>
       <div id="tabs"></div>
@@ -178,6 +179,24 @@
     <button class="primary">현재 구성 저장</button>
   </form>
   <ul id="layoutlist" class="plist"></ul>
+</dialog>
+
+<dialog id="inboxdlg">
+  <div class="dlghead">
+    <h2>결재함</h2>
+    <button type="button" id="inboxreload" title="새로고침">↻</button>
+    <button type="button" data-close>닫기</button>
+  </div>
+  <ul id="aplist" class="plist"></ul>
+  <h3 class="sub">진행 중인 기능</h3>
+  <ul id="instlist" class="plist"></ul>
+  <h3 class="sub">새 기능 시작</h3>
+  <form id="instform" class="instform">
+    <select id="instdiv" title="본부"></select>
+    <input id="instfeature" placeholder="기능 이름 (영소문자·숫자·_)" pattern="[a-z][a-z0-9_]*" required autocomplete="off">
+    <textarea id="instbrief" rows="2" placeholder="요청 내용 (설계부에 전달)"></textarea>
+    <button class="primary">시작</button>
+  </form>
 </dialog>
 
 <dialog id="persistdlg">

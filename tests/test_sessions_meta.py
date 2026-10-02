@@ -12,7 +12,7 @@ def config_dir(tmp_path, monkeypatch):
 def test_adopt_role_sessions():
     assert sessions_meta.adopt(["mw-impl-impl-skeleton", "dev_monitor", "mw-quality-reviewer"])
     meta = sessions_meta.get("mw-impl-impl-skeleton")
-    assert meta == {"division": "mw", "dept": "impl", "role": "impl"}
+    assert meta == {"division": "mw", "dept": "impl", "role": "impl", "grouped": True}
     assert sessions_meta.get("dev_monitor") is None
     assert store.group_of()["mw-impl-impl-skeleton"] == "mw/impl"
     assert store.group_of()["mw-quality-reviewer"] == "mw/quality"
@@ -47,3 +47,10 @@ def test_update_rename_forget():
 
 def test_missing_file_is_empty():
     assert sessions_meta.all_meta() == {}
+
+
+def test_adopt_groups_launcher_sessions_with_meta():
+    sessions_meta.update("mw-impl-impl-skeleton", division="mw", dept="impl", role="impl", worktree="/wt")
+    assert sessions_meta.adopt(["mw-impl-impl-skeleton"])
+    assert store.group_of()["mw-impl-impl-skeleton"] == "mw/impl"
+    assert sessions_meta.get("mw-impl-impl-skeleton")["worktree"] == "/wt"

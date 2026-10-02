@@ -100,6 +100,7 @@ async function refresh() {
     return;
   }
   loadStopState();
+  loadInboxBadge();
   renderList();
   renderTabs();
   renderWinbar();
@@ -535,6 +536,160 @@ async function moveTo(g) {
 }
 
 let drag = null;
+
+const OPTION_LABEL = {
+  approve: '승인', reject: '반려', revise: '수정 요청', redesign: '재설계', drop: '중단', override: '통과 처리', answered: '확인',
+};
+const KIND_LABEL = { gate: '결재', escalate: '에스컬레이션', needs_input: '입력 대기', external: '외부 발송' };
+const STATUS_LABEL = { running: '진행 중', done: '완료', dropped: '중단', escalated: '에스컬레이션' };
+const REASON_REQUIRED = new Set(['reject', 'revise', 'redesign', 'drop', 'override']);
+let companyReady = false;
+
+async function loadInboxBadge() {
+  if (!companyReady) {
+    try {
+      const s = await api('GET', '/company');
+      companyReady = Object.values(s.exists).some(Boolean);
+    } catch {
+      return;
+    }
+    $('inboxbtn').hidden = !companyReady;
+    if (!companyReady) return;
+  }
+  try {
+    const pending = await api('GET', '/approvals?status=pending');
+    $('inboxbadge').hidden = !pending.length;
+    $('inboxbadge').textContent = pending.length;
+  } catch {}
+}
+
+function evidenceButton(ref) {
+  const b = document.createElement('button');
+  b.textContent = ref;
+  b.title = ref.startsWith('/') ? '파일 보기' : '복사';
+  b.onclick = () => (ref.startsWith('/') ? (openFile(ref), $('inboxdlg').close())
+    : copyText(ref).then((ok) => toast(ok ? '복사했습니다' : '복사 실패')));
+  return b;
+}
+
+async function decideApproval(a, decision) {
+  let reason = null;
+  if (REASON_REQUIRED.has(decision)) {
+    reason = prompt(`${OPTION_LABEL[decision] || decision} 사유를 입력하세요`);
+    if (!reason?.trim()) return;
+  } else if (!confirm(`'${a.instance} · ${a.node}'을(를) ${OPTION_LABEL[decision] || decision}할까요?`)) {
+    return;
+  }
+  try {
+    await api('POST', `/approvals/${enc(a.id)}/decide`, { decision, reason });
+    toast(`${OPTION_LABEL[decision] || decision} 처리했습니다`);
+  } catch (e) {
+    toast(e.message, 4000);
+  }
+  loadInbox();
+}
+
+async function loadInbox() {
+  let pending, insts, divs;
+  try {
+    [pending, insts, divs] = await Promise.all([
+      api('GET', '/approvals?status=pending'), api('GET', '/company/instances'), api('GET', '/company/divisions'),
+    ]);
+  } catch (e) {
+    return toast(e.message);
+  }
+  $('inboxbadge').hidden = !pending.length;
+  $('inboxbadge').textContent = pending.length;
+  const ap = $('aplist');
+  ap.innerHTML = '';
+  for (const a of pending) {
+    const li = document.createElement('li');
+    li.innerHTML = '<div class="aphead"><span class="kind"></span><span class="what"></span><span class="when"></span></div><div class="summary"></div><div class="evidence"></div><div class="opts"></div>';
+    li.querySelector('.kind').textContent = KIND_LABEL[a.kind] || a.kind;
+    li.querySelector('.kind').classList.add(a.kind);
+    li.querySelector('.what').textContent = `${a.instance} · ${a.node}${a.session ? ` · ${a.session}` : ''}`;
+    li.querySelector('.when').textContent = new Date(a.created).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+    li.querySelector('.summary').textContent = a.summary;
+    const ev = li.querySelector('.evidence');
+    for (const ref of a.evidence || []) ev.appendChild(evidenceButton(ref));
+    if (!ev.childElementCount) ev.remove();
+    const opts = li.querySelector('.opts');
+    if (a.session && sessions.some((s) => s.name === a.session)) {
+      const open = document.createElement('button');
+      open.textContent = '세션 열기';
+      open.onclick = () => { $('inboxdlg').close(); openSession(a.session); };
+      opts.appendChild(open);
+    }
+    for (const o of a.options) {
+      const b = document.createElement('button');
+      b.textContent = OPTION_LABEL[o] || o;
+      if (o === 'approve' || o === 'answered') b.className = 'primary';
+      b.onclick = () => decideApproval(a, o);
+      opts.appendChild(b);
+    }
+    ap.appendChild(li);
+  }
+  if (!pending.length) ap.innerHTML = '<li class="empty">미결 결재가 없습니다</li>';
+  const il = $('instlist');
+  il.innerHTML = '';
+  for (const i of insts) {
+    const li = document.createElement('li');
+    li.innerHTML = '<div class="ihead"><span class="what"></span><span class="meta"></span></div><div class="note"></div><div class="opts"></div>';
+    li.querySelector('.what').textContent = `${i.division}/${i.feature}`;
+    const counters = Object.entries(i.counters || {}).map(([k, v]) => `${k} ${v}회`).join(', ');
+    li.querySelector('.meta').textContent = [`${STATUS_LABEL[i.status] || i.status}`, `노드 ${i.node}`, i.queued ? '대기열' : '',
+      i.attempt ? `재시도 ${i.attempt}` : '', counters ? `반려 ${counters}` : ''].filter(Boolean).join(' · ');
+    const note = li.querySelector('.note');
+    note.textContent = (i.note || '').slice(0, 300);
+    if (!note.textContent) note.remove();
+    const move = document.createElement('button');
+    move.textContent = '노드 이동';
+    move.onclick = async () => {
+      const to = prompt(`${i.division}/${i.feature}를 옮길 노드 이름`, i.node);
+      if (!to?.trim() || to.trim() === i.node) return;
+      const reason = prompt('이동 사유') || '';
+      try {
+        await api('POST', `/company/instances/${enc(i.division)}/${enc(i.feature)}/transition`, { to: to.trim(), reason });
+        toast('이동 요청을 보냈습니다. 오케스트레이터가 다음 주기에 반영합니다', 4000);
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+    li.querySelector('.opts').appendChild(move);
+    il.appendChild(li);
+  }
+  if (!insts.length) il.innerHTML = '<li class="empty">진행 중인 기능이 없습니다</li>';
+  const sel = $('instdiv');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  for (const d of divs) {
+    const o = document.createElement('option');
+    o.value = d.id;
+    o.textContent = `${d.id} · ${d.name}`;
+    sel.appendChild(o);
+  }
+  if (cur) sel.value = cur;
+}
+
+$('inboxbtn').onclick = () => {
+  $('inboxdlg').showModal();
+  loadInbox();
+};
+$('inboxreload').onclick = loadInbox;
+$('instform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await api('POST', '/company/instances', {
+      division: $('instdiv').value, feature: $('instfeature').value.trim(), brief: $('instbrief').value.trim(),
+    });
+    toast('시작 요청을 보냈습니다. 오케스트레이터가 다음 주기에 시작합니다', 4000);
+    $('instfeature').value = '';
+    $('instbrief').value = '';
+    setTimeout(loadInbox, 1500);
+  } catch (err) {
+    toast(err.message, 4000);
+  }
+});
 
 function renderStop(info) {
   $('stopbar').hidden = !info;
