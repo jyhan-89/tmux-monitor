@@ -3,11 +3,13 @@ import base64
 import json
 import logging
 import os
+import time
 
 from cryptography.hazmat.primitives import serialization
 from py_vapid import Vapid
 from pywebpush import WebPushException, webpush
 
+import history
 import store
 import tmuxctl
 
@@ -19,6 +21,8 @@ SUBS_FILE = "push_subs.json"
 VAPID_SUB = os.environ.get("TMUX_WEB_VAPID_SUB", "https://github.com/jyhan-89/tmux-web-monitor")
 
 status: dict[str, dict] = {}
+hook_status: dict[str, dict] = {}
+HOOK_FRESH = 30.0
 _pending: dict[str, str] = {}
 
 
@@ -80,29 +84,48 @@ def _notify_change(name: str, old: str | None, new: str, preview: list[str]) -> 
     return None
 
 
-def poll_once() -> list[tuple[str, str, str]]:
+def _record(name: str, old: str | None, new: str, source: str) -> None:
+    try:
+        history.record({"type": "status_change", "session": name, "from": old, "to": new, "source": source})
+    except Exception:
+        log.exception("이력 기록 실패")
+
+
+def poll_once(now: float | None = None) -> list[tuple[str, str, str]]:
     notes = []
+    now = time.time() if now is None else now
     sessions = tmuxctl.list_sessions()
     for s in sessions:
         name = s["name"]
         state, preview = tmuxctl.analyze(s["command"], tmuxctl.capture(s["pane_id"]))
+        hook = hook_status.get(name)
+        fresh = bool(hook) and now - hook["at"] < HOOK_FRESH and state not in ("shell", "running")
+        source = "hook" if fresh else "screen"
+        if fresh:
+            state = hook["state"]
         prev = status.get(name)
         if prev is None:
-            status[name] = {"state": state, "preview": preview}
+            status[name] = {"state": state, "preview": preview, "source": source}
             continue
         prev["preview"] = preview
+        prev["source"] = source
         if state == prev["state"]:
             _pending.pop(name, None)
-        elif _pending.get(name) == state:
-            _pending.pop(name)
+        elif fresh or _pending.get(name) == state:
+            _pending.pop(name, None)
             note = _notify_change(name, prev["state"], state, preview)
+            if source == "screen":
+                _record(name, prev["state"], state, source)
             prev["state"] = state
             if note:
                 notes.append((note[0], note[1], name))
         else:
             _pending[name] = state
-    for gone in set(status) - {s["name"] for s in sessions}:
+    alive = {s["name"] for s in sessions}
+    for gone in set(status) - alive:
         status.pop(gone, None)
+    for gone in set(hook_status) - alive:
+        hook_status.pop(gone, None)
     return notes
 
 

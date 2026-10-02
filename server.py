@@ -34,6 +34,7 @@ import auth
 import company_api
 import control_api
 import directives_api
+import event_api
 import push
 import sessions_meta
 import store
@@ -254,6 +255,7 @@ def api_sessions():
         s["meta"] = metas.get(s["name"])
         st = push.status.get(s["name"], {})
         s["state"] = st.get("state", "")
+        s["state_source"] = st.get("source", "")
         s["preview"] = st.get("preview", [])
     return sessions
 
@@ -944,6 +946,7 @@ router.include_router(api)
 router.include_router(company_api.router)
 router.include_router(control_api.router)
 router.include_router(directives_api.router)
+router.include_router(event_api.router)
 
 
 def set_winsize(fd: int, rows: int, cols: int) -> None:

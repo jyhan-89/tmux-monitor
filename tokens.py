@@ -70,6 +70,23 @@ def issue(role: str, session: str | None = None) -> str:
     return token
 
 
+def hook_token_file() -> Path:
+    return secrets_dir() / "hook.token"
+
+
+def ensure_hook_token() -> str:
+    f = hook_token_file()
+    if f.exists():
+        token = f.read_text().strip()
+        if lookup(token):
+            return token
+    token = issue("hook")
+    fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as out:
+        out.write(token + "\n")
+    return token
+
+
 def lookup(token: str | None) -> dict | None:
     if not token:
         return None
