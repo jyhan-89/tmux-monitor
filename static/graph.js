@@ -141,12 +141,10 @@ function templateKeyOf(divKey) {
   return keys[0] || null;
 }
 
-function renderProcess() {
-  const key = templateKeyOf(graph.division);
-  if (!key) return { svg: '<p class="gempty">프로세스 템플릿이 없습니다. 위의 ＋ 템플릿으로 만드세요</p>', nodes: [] };
-  const t = templates()[key];
+const PW = 150;
+
+function autoPositions(t) {
   const ns = t.nodes || {};
-  const inst = graph.insts.find((i) => `${i.division}/${i.feature}` === graph.instance);
   const main = [];
   for (let k = t.start; k && ns[k] && !main.includes(k); k = ns[k].next) {
     main.push(k);
@@ -155,60 +153,236 @@ function renderProcess() {
   const rest = Object.keys(ns).filter((k) => !main.includes(k));
   const left = rest.filter((k) => ns[k].type !== 'approval' && ns[k].type !== 'terminal');
   const right = rest.filter((k) => ns[k].type === 'approval' || ns[k].type === 'terminal');
-  const W = 150;
-  const cx = 230;
-  const lx = 20;
-  const rx = 440;
   const pos = {};
-  main.forEach((k, i) => { pos[k] = { x: cx, y: 20 + i * ROW }; });
-  const midY = 20 + Math.max(0, Math.floor((main.length - 1) / 2)) * ROW;
-  left.forEach((k, i) => { pos[k] = { x: lx, y: midY + i * ROW }; });
-  right.forEach((k, i) => { pos[k] = { x: rx, y: midY + ROW + i * ROW }; });
-  const edges = [];
-  const arrow = (from, to, cls, label = '') => {
-    const a = pos[from];
-    const b = pos[to];
-    if (!a || !b) return;
-    let d;
-    if (a.x === b.x) {
-      d = b.y > a.y ? `M${a.x + W / 2},${a.y + NH} L${b.x + W / 2},${b.y}`
-        : `M${a.x},${a.y + NH / 2} C${a.x - 40},${a.y + NH / 2} ${b.x - 40},${b.y + NH / 2} ${b.x},${b.y + NH / 2}`;
-    } else if (b.x < a.x) {
-      d = `M${a.x},${a.y + NH / 2} C${a.x - 30},${a.y + NH / 2} ${b.x + W + 30},${b.y + NH / 2} ${b.x + W},${b.y + NH / 2}`;
-    } else {
-      d = `M${a.x + W},${a.y + NH / 2} C${a.x + W + 30},${a.y + NH / 2} ${b.x - 30},${b.y + NH / 2} ${b.x},${b.y + NH / 2}`;
-    }
-    edges.push(`<path class="gedge ${cls}" d="${d}" marker-end="url(#arr-${cls})"></path>`);
-    if (label) edges.push(`<text class="glabel ${cls}" x="${(a.x + b.x + W) / 2}" y="${(a.y + b.y + NH) / 2}">${esc(label)}</text>`);
-  };
+  main.forEach((k, i) => { pos[k] = { x: 230, y: 30 + i * ROW }; });
+  const midY = 30 + Math.max(0, Math.floor((main.length - 1) / 2)) * ROW;
+  left.forEach((k, i) => { pos[k] = { x: 20, y: midY + i * ROW }; });
+  right.forEach((k, i) => { pos[k] = { x: 440, y: midY + ROW + i * ROW }; });
+  return pos;
+}
+
+function processPositions(key, t) {
+  const saved = graph.layout?.templates?.[key] || {};
+  const auto = autoPositions(t);
+  const pos = {};
+  for (const k of Object.keys(t.nodes || {})) pos[k] = saved[k] ? { x: saved[k][0], y: saved[k][1] } : auto[k];
+  return pos;
+}
+
+function edgeList(t) {
+  const ns = t.nodes || {};
+  const out = [];
   for (const [k, n] of Object.entries(ns)) {
-    if (n.next) arrow(k, n.next, left.includes(k) ? 'loop' : 'next');
-    if (n.on_fail) arrow(k, n.on_fail, ns[n.on_fail]?.type === 'approval' ? 'esc' : 'fail');
-    if (n.loop?.on_exceed) arrow(k, n.loop.on_exceed, 'esc', '상한 초과');
-    if (n.type === 'approval' && (n.options || []).includes('redesign')) arrow(k, t.start, 'loop', '재설계');
+    if (n.next && ns[n.next]) out.push({ from: k, to: n.next, port: 'next' });
+    if (n.on_fail && ns[n.on_fail]) out.push({ from: k, to: n.on_fail, port: 'fail' });
+    if (n.loop?.on_exceed && ns[n.loop.on_exceed]) out.push({ from: k, to: n.loop.on_exceed, port: 'exceed' });
+    if (n.type === 'approval' && (n.options || []).includes('redesign') && ns[t.start]) out.push({ from: k, to: t.start, port: 'redesign' });
   }
-  const nodes = [];
-  const boxes = Object.entries(pos).map(([k, p]) => {
-    const n = ns[k];
-    const item = { kind: 'node', template: key, key: k };
-    item.i = nodes.push(item) - 1;
-    const cur = inst?.node === k ? ' cur' : '';
-    const sel = graph.selected?.kind === 'node' && graph.selected.key === k ? ' sel' : '';
-    const type = n.type === 'approval' ? 'approval' : n.type === 'terminal' ? 'terminal' : 'work';
-    const sub = n.type === 'approval' ? '결재' : n.type === 'terminal' ? '종료' : `${n.role || ''}${n.parallel ? ' ×계층' : ''}${n.requires_approval ? ' · 결재' : ''}`;
-    let counter = '';
-    if (n.loop?.max) {
-      counter = Object.entries(n.loop.max).map(([src, mx]) => (inst ? `${src} ${inst.counters?.[src] || 0}/${mx}` : `${src} ≤${mx}`)).join(' · ');
+  return out;
+}
+
+const PORT_LABEL = { next: '통과', fail: '실패', exceed: '상한 초과', redesign: '재설계' };
+
+function portPoint(p, port) {
+  if (port === 'next') return { x: p.x + PW / 2, y: p.y + NH, dx: 0, dy: 1 };
+  if (port === 'fail') return { x: p.x + PW, y: p.y + NH / 2, dx: 1, dy: 0 };
+  if (port === 'exceed') return { x: p.x + PW - 14, y: p.y + NH, dx: 0.5, dy: 1 };
+  return { x: p.x, y: p.y + NH / 2, dx: -1, dy: 0 };
+}
+
+function entryPoint(a, b, port) {
+  if (port === 'next' || port === 'redesign') return { x: b.x + PW / 2, y: b.y, dx: 0, dy: 1 };
+  return b.x + PW / 2 >= a.x + PW / 2 ? { x: b.x, y: b.y + NH / 2, dx: 1, dy: 0 } : { x: b.x + PW, y: b.y + NH / 2, dx: -1, dy: 0 };
+}
+
+function curve(s, e) {
+  const k = Math.max(40, Math.hypot(e.x - s.x, e.y - s.y) / 3);
+  return `M${s.x},${s.y} C${s.x + s.dx * k},${s.y + s.dy * k} ${e.x - e.dx * k},${e.y - e.dy * k} ${e.x},${e.y}`;
+}
+
+function edgeClass(t, e, pos) {
+  if (e.port === 'redesign') return 'loop';
+  if (e.port === 'exceed') return 'esc';
+  if (e.port === 'fail') return t.nodes[e.to]?.type === 'approval' ? 'esc' : 'fail';
+  return pos[e.to].y < pos[e.from].y ? 'loop' : 'next';
+}
+
+function edgesSvg(t, pos, edges) {
+  return edges.map((e, i) => {
+    const a = pos[e.from];
+    const b = pos[e.to];
+    if (!a || !b) return '';
+    const s = e.port === 'redesign' ? portPoint(a, 'redesign') : portPoint(a, e.port);
+    const d = curve(s, entryPoint(a, b, e.port));
+    const cls = edgeClass(t, e, pos);
+    const sel = graph.selected?.kind === 'edge' && graph.selected.from === e.from && graph.selected.port === e.port ? ' sel' : '';
+    const label = e.port === 'next' || e.port === 'fail' ? '' : `<text class="glabel ${cls}" x="${(s.x + b.x + PW / 2) / 2}" y="${(s.y + b.y) / 2}">${esc(PORT_LABEL[e.port])}</text>`;
+    return `<path class="gedge ${cls}${sel}" d="${d}" marker-end="url(#arr-${cls})"></path>
+      ${e.port === 'redesign' ? '' : `<path class="gehit" d="${d}" data-edge="${i}"><title>${esc(e.from)} → ${esc(e.to)} (${PORT_LABEL[e.port]}) · 눌러서 바꾸기</title></path>`}${label}`;
+  }).join('');
+}
+
+function reachable(t) {
+  const seen = new Set();
+  const stack = [t.start];
+  while (stack.length) {
+    const k = stack.pop();
+    if (!k || seen.has(k) || !t.nodes[k]) continue;
+    seen.add(k);
+    for (const e of edgeList(t)) if (e.from === k) stack.push(e.to);
+    const n = t.nodes[k];
+    if (n.type === 'approval' && (n.options || []).includes('drop')) {
+      for (const [x, m] of Object.entries(t.nodes)) if (m.type === 'terminal') stack.push(x);
     }
-    return `<g class="pnode ${type}${cur}${sel}" data-i="${item.i}" transform="translate(${p.x},${p.y})">
-      <title>${esc(k)}${n.gate ? ` · gate ${esc(n.gate)}` : ''}</title>
-      <rect width="${W}" height="${NH}" rx="${type === 'work' ? 6 : 15}"></rect>
-      <text x="10" y="13" class="pk">${esc(k)}${cur ? ' ●' : ''}</text><text x="10" y="25" class="ps">${esc(sub)}</text>
-      ${counter ? `<text x="0" y="${NH + 12}" class="pc">${esc(counter)}</text>` : ''}</g>`;
-  });
-  const h = 40 + Math.max(main.length, midY / ROW + left.length + 1, midY / ROW + right.length + 2) * ROW;
+  }
+  return seen;
+}
+
+function processNodeSvg(t, k, p, inst, key, live) {
+  const n = t.nodes[k];
+  const cur = inst?.node === k ? ' cur' : '';
+  const sel = graph.selected?.kind === 'node' && graph.selected.key === k ? ' sel' : '';
+  const type = n.type === 'approval' ? 'approval' : n.type === 'terminal' ? 'terminal' : 'work';
+  const sub = n.type === 'approval' ? '결재' : n.type === 'terminal' ? '종료' : `${n.role || '(역할 없음)'}${n.parallel ? ' ×계층' : ''}${n.requires_approval ? ' · 결재' : ''}`;
+  let counter = '';
+  if (n.loop?.max && inst) counter = Object.entries(n.loop.max).filter(([src]) => inst.counters?.[src]).map(([src, mx]) => `${src} ${inst.counters[src]}/${mx}`).join(' · ');
+  const ports = type === 'work'
+    ? `<circle class="gport next" data-port="next" cx="${PW / 2}" cy="${NH}" r="6"><title>통과하면 → 끌어서 연결</title></circle>
+       <circle class="gport fail" data-port="fail" cx="${PW}" cy="${NH / 2}" r="6"><title>실패하면 → 끌어서 연결</title></circle>
+       ${n.loop ? `<circle class="gport exceed" data-port="exceed" cx="${PW - 14}" cy="${NH}" r="5"><title>상한 초과 → 끌어서 연결</title></circle>` : ''}`
+    : '';
+  const orphan = live.has(k) ? '' : ' orphan';
+  return `<g class="pnode ${type}${cur}${sel}${orphan}" data-key="${esc(k)}" transform="translate(${p.x},${p.y})">
+    <title>${esc(k)}${orphan ? ' · 시작에서 도달할 수 없음 (실행되지 않음)' : ''}${n.gate ? ` · gate ${esc(n.gate)}` : ''} · 끌어서 옮기기</title>
+    <rect width="${PW}" height="${NH}" rx="${type === 'work' ? 6 : 15}"></rect>
+    <text x="10" y="13" class="pk">${esc(k)}${cur ? ' ●' : ''}</text><text x="10" y="25" class="ps">${esc(sub)}</text>
+    ${t.start === k ? `<text x="0" y="-5" class="pstart">▶ 시작</text>` : ''}
+    ${counter ? `<text x="0" y="${NH + 14}" class="pc">${esc(counter)}</text>` : ''}${ports}</g>`;
+}
+
+function renderProcess() {
+  const key = templateKeyOf(graph.division);
+  if (!key) return { svg: '<p class="gempty">프로세스 템플릿이 없습니다. 위의 ＋ 템플릿으로 만드세요</p>', nodes: [] };
+  const t = templates()[key];
+  const inst = graph.insts.find((i) => `${i.division}/${i.feature}` === graph.instance);
+  const pos = processPositions(key, t);
+  const edges = edgeList(t);
+  const xs = Object.values(pos).map((p) => p.x);
+  const ys = Object.values(pos).map((p) => p.y);
+  const w = Math.max(640, (xs.length ? Math.max(...xs) : 0) + PW + 120);
+  const h = Math.max(420, (ys.length ? Math.max(...ys) : 0) + NH + 120);
   const defs = ['next', 'fail', 'loop', 'esc'].map((c) => `<marker id="arr-${c}" class="gm ${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"></path></marker>`).join('');
-  return { svg: `<svg width="${rx + W + 20}" height="${h}" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${edges.join('')}${boxes.join('')}</svg>`, nodes };
+  const live = reachable(t);
+  const nodesSvg = Object.entries(pos).map(([k, p]) => processNodeSvg(t, k, p, inst, key, live)).join('');
+  const svg = `<svg id="gproc" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>
+    <rect class="gbg" width="${w}" height="${h}"></rect><g id="gedges">${edgesSvg(t, pos, edges)}</g><g id="gnodes">${nodesSvg}</g><path id="gtemp" class="gedge temp" d=""></path></svg>
+    <p class="ghint">상자를 끌어 옮기고, 상자의 점(● 통과 · ● 실패 · ● 상한 초과)을 다른 상자로 끌어 연결합니다. 화살표를 누르면 바꾸거나 지울 수 있고, 빈 곳을 두 번 누르면 새 단계를 만듭니다.</p>`;
+  return { svg, nodes: [], process: { key, t, pos, edges } };
+}
+
+async function saveLayout(key, pos) {
+  graph.layout = graph.layout || { templates: {} };
+  graph.layout.templates = graph.layout.templates || {};
+  graph.layout.templates[key] = Object.fromEntries(Object.entries(pos).map(([k, p]) => [k, [Math.round(p.x), Math.round(p.y)]]));
+  try {
+    await api('PUT', '/company/layout', graph.layout);
+  } catch (e) {
+    toast(`배치 저장 실패: ${e.message}`);
+  }
+}
+
+function connectPort(key, from, port, to) {
+  const base = ['templates', key, 'nodes', from];
+  if (port === 'next') return saveGraph('process', [{ path: [...base, 'next'], value: to }], { kind: 'edge', template: key, from, port, to });
+  if (port === 'fail') return saveGraph('process', [{ path: [...base, 'on_fail'], value: to }], { kind: 'edge', template: key, from, port, to });
+  if (port === 'exceed') return saveGraph('process', [{ path: [...base, 'loop', 'on_exceed'], value: to }], { kind: 'edge', template: key, from, port, to });
+  return null;
+}
+
+function svgPoint(svg, ev) {
+  const r = svg.getBoundingClientRect();
+  return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+}
+
+function bindProcess(ctx) {
+  const svg = $('gproc');
+  if (!svg) return;
+  const { key, t, pos, edges } = ctx;
+  const redrawEdges = () => { $('gedges').innerHTML = edgesSvg(t, pos, edges); bindEdges(); };
+  const bindEdges = () => {
+    for (const el of svg.querySelectorAll('.gehit')) {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const ed = edges[+el.dataset.edge];
+        selectGraphNode({ kind: 'edge', template: key, ...ed });
+      });
+    }
+  };
+  bindEdges();
+  for (const g of svg.querySelectorAll('.pnode')) {
+    const k = g.dataset.key;
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const portEl = e.target.closest('.gport');
+      const start = svgPoint(svg, e);
+      if (portEl) {
+        const port = portEl.dataset.port;
+        const s = portPoint(pos[k], port);
+        const temp = $('gtemp');
+        const hit = (ev) => {
+          const p = svgPoint(svg, ev);
+          const found = Object.entries(pos).find(([n, q]) => n !== k && p.x >= q.x - 6 && p.x <= q.x + PW + 6 && p.y >= q.y - 6 && p.y <= q.y + NH + 6);
+          return found ? found[0] : null;
+        };
+        const mark = (target) => {
+          for (const n of svg.querySelectorAll('.pnode')) n.classList.toggle('drop', n.dataset.key === target);
+        };
+        const move = (ev) => {
+          const p = svgPoint(svg, ev);
+          temp.setAttribute('d', `M${s.x},${s.y} L${p.x},${p.y}`);
+          mark(hit(ev));
+        };
+        const up = (ev) => {
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('pointerup', up);
+          temp.setAttribute('d', '');
+          const target = hit(ev);
+          mark(null);
+          if (target) connectPort(key, k, port, target);
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+        return;
+      }
+      const origin = { ...pos[k] };
+      let moved = false;
+      const move = (ev) => {
+        const p = svgPoint(svg, ev);
+        if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 4) return;
+        moved = true;
+        pos[k] = { x: Math.max(0, origin.x + p.x - start.x), y: Math.max(12, origin.y + p.y - start.y) };
+        g.setAttribute('transform', `translate(${pos[k].x},${pos[k].y})`);
+        redrawEdges();
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        if (moved) {
+          saveLayout(key, pos).then(() => renderGraph());
+        } else {
+          selectGraphNode({ kind: 'node', template: key, key: k });
+        }
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+  }
+  svg.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.pnode') || e.target.closest('.gehit')) return;
+    const p = svgPoint(svg, e);
+    selectGraphNode({ kind: 'newnode', template: key, pos: { x: Math.max(0, p.x - PW / 2), y: Math.max(12, p.y - NH / 2) } });
+  });
 }
 
 function graphLegend() {
@@ -234,6 +408,15 @@ function renderActions() {
     if (templateKeyOf(graph.division)) {
       add('＋ 단계', { kind: 'newnode', template: templateKeyOf(graph.division) });
       add('템플릿 설정', { kind: 'template', template: templateKeyOf(graph.division) });
+      const auto = document.createElement('button');
+      auto.textContent = '자동 정렬';
+      auto.onclick = async () => {
+        const key = templateKeyOf(graph.division);
+        if (graph.layout?.templates?.[key]) delete graph.layout.templates[key];
+        try { await api('PUT', '/company/layout', graph.layout || { templates: {} }); } catch (e) { return toast(e.message); }
+        renderGraph();
+      };
+      box.appendChild(auto);
     }
     add('＋ 템플릿', { kind: 'newtemplate' });
   }
@@ -293,10 +476,11 @@ function renderGraph() {
   $('gdivsel').hidden = graph.view !== 'process' || !divs.length;
   $('ginstsel').hidden = graph.view !== 'process' || !divs.length;
   for (const b of document.querySelectorAll('#graph .gvtab')) b.classList.toggle('on', b.dataset.view === graph.view);
-  const { svg, nodes } = graph.view === 'org' ? renderOrg() : renderProcess();
+  const { svg, nodes, process } = graph.view === 'org' ? renderOrg() : renderProcess();
   const box = $('gcanvas');
   box.innerHTML = svg + (graph.view === 'org' ? freeStrip() : '');
   if (graph.view === 'org') bindFreeStrip(nodes);
+  if (process) bindProcess(process);
   $('glegend').innerHTML = graphLegend();
   for (const el of box.querySelectorAll('[data-i]')) {
     el.addEventListener('click', (e) => {
@@ -685,8 +869,9 @@ const PANELS = {
           ${field('발생 단계별 상한 (단계: 횟수, 한 줄에 하나)', 'gf-loop', Object.entries(n.loop?.max || {}).map(([k, v]) => `${k}: ${v}`).join('\n'), 'textarea')}
           ${selectField('상한 초과 시', 'gf-exceed', n.loop?.on_exceed || '', ['', ...nodeOpts].map((k) => [k, k || '(없음)']))}
         </div>
-        <div class="gpactions"><button id="gpsave" class="primary">저장</button><button id="gpdel" class="danger">단계 삭제</button></div>`,
+        <div class="gpactions"><button id="gpsave" class="primary">저장</button>${t.start !== sel.key ? '<button id="gpstart">시작 단계로</button>' : ''}<button id="gpdel" class="danger">단계 삭제</button></div>`,
       bind() {
+        if ($('gpstart')) $('gpstart').onclick = () => saveGraph('process', [{ path: ['templates', sel.template, 'start'], value: sel.key }]);
         $('gf-isloop').onchange = () => { $('gf-loopbox').hidden = !$('gf-isloop').checked; };
         $('gpsave').onclick = () => tryOps(() => {
           const ops = [];
@@ -726,7 +911,7 @@ const PANELS = {
         ${field('게이트', 'gf-gate', '')}
         ${selectField('실패하면', 'gf-fail', fails.find((k) => t.nodes[k].type === 'approval') || (t.nodes.escalate ? 'escalate' : '__esc__'),
     [...fails.map((k) => [k, k]), ...(t.nodes.escalate ? [] : [['__esc__', '＋ 결재 노드 escalate 새로 만들기']])])}</div>
-        ${selectField('어디에 넣을까요', 'gf-after', names.filter((k) => t.nodes[k].type !== 'terminal').slice(-1)[0] || '__start__',
+        ${selectField('어디에 넣을까요', 'gf-after', sel.pos ? '' : (names.filter((k) => t.nodes[k].type !== 'terminal').slice(-1)[0] || '__start__'),
     [['__start__', '맨 앞 (시작 단계)'], ...names.filter((k) => t.nodes[k].type !== 'terminal').map((k) => [k, `${k} 뒤`]), ['', '(연결하지 않음)']])}
         <p class="gdim">고른 단계의 "통과하면"이 새 단계로 바뀌고, 새 단계는 원래 다음 단계로 이어집니다.</p>
         <div class="gpactions"><button id="gpsave" class="primary">추가</button></div>`,
@@ -760,8 +945,30 @@ const PANELS = {
           ops.push({ path: [...base, id], value: node });
           if (after === '__start__') ops.push({ path: ['templates', sel.template, 'start'], value: id });
           else if (after) ops.push({ path: [...base, after, 'next'], value: id });
+          if (sel.pos) {
+            const pos = processPositions(sel.template, t);
+            pos[id] = sel.pos;
+            return saveLayout(sel.template, pos).then(() => saveGraph('process', ops, { kind: 'node', template: sel.template, key: id }));
+          }
           return saveGraph('process', ops, { kind: 'node', template: sel.template, key: id });
         });
+      },
+    };
+  },
+  edge(sel) {
+    const t = templates()[sel.template];
+    const names = Object.keys(t.nodes).filter((k) => k !== sel.from);
+    const field_ = { next: 'next', fail: 'on_fail', exceed: 'loop' }[sel.port];
+    const path = sel.port === 'exceed' ? ['templates', sel.template, 'nodes', sel.from, 'loop', 'on_exceed']
+      : ['templates', sel.template, 'nodes', sel.from, field_];
+    return {
+      html: `${panelHead(`${sel.from} → ${sel.to}`, PORT_LABEL[sel.port])}
+        ${selectField('연결 대상', 'gf-to', sel.to, names)}
+        <div class="gpactions"><button id="gpsave" class="primary">바꾸기</button><button id="gpdel" class="danger">연결 삭제</button></div>
+        <p class="gdim">${sel.port === 'next' ? '통과 연결을 지우면 이 단계는 끝 단계가 될 수 없어 저장이 거부될 수 있습니다.' : ''}</p>`,
+      bind() {
+        $('gpsave').onclick = () => connectPort(sel.template, sel.from, sel.port, $('gf-to').value);
+        $('gpdel').onclick = () => saveGraph('process', [{ path, delete: true }], null);
       },
     };
   },
@@ -858,19 +1065,23 @@ function renderGraphPanel() {
 async function saveGraph(kind, ops, nextSel) {
   const ul = $('gpissues');
   if (ul) ul.innerHTML = '';
+  let res;
   try {
-    await api('PATCH', `/company/${kind}`, { ops: ops.filter(Boolean) });
+    res = await api('PATCH', `/company/${kind}`, { ops: ops.filter(Boolean) });
   } catch (e) {
     let issues = [];
     try { issues = JSON.parse(e.message).issues || []; } catch {}
-    if (ul) {
+    if (ul && !$('gpanel').hidden) {
       ul.innerHTML = issues.length
         ? issues.map((i) => `<li><b>${esc(i.rule)}</b> ${esc(i.where)}<br>${esc(i.message)}</li>`).join('')
         : `<li>${esc(e.message)}</li>`;
+    } else {
+      toast(`저장하지 않았습니다: ${issues.length ? issues.map((i) => i.message).join(' · ') : e.message}`, 6000);
     }
     return false;
   }
-  toast('저장했습니다');
+  const warn = res?.warnings || [];
+  toast(warn.length ? `저장했습니다 · 경고 ${warn.length}건: ${warn.map((w) => w.message).join(', ')}` : '저장했습니다', warn.length ? 5000 : 2000);
   if (nextSel !== undefined) graph.selected = nextSel;
   await loadGraph();
   renderGraphPanel();
@@ -885,8 +1096,8 @@ function selectGraphNode(n) {
 
 async function loadGraph() {
   try {
-    [graph.model, graph.insts, graph.summary] = await Promise.all([
-      api('GET', '/company/model'), api('GET', '/company/instances'), api('GET', '/company'),
+    [graph.model, graph.insts, graph.summary, graph.layout] = await Promise.all([
+      api('GET', '/company/model'), api('GET', '/company/instances'), api('GET', '/company'), api('GET', '/company/layout'),
     ]);
   } catch (e) {
     toast(e.message);

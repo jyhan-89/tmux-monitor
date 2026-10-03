@@ -96,7 +96,6 @@ CASES = {
     "loop_max": lambda d: nodes(d)["analyze"]["loop"].pop("max"),
     "loop_on_exceed": lambda d: nodes(d)["analyze"]["loop"].pop("on_exceed"),
     "loop_max_missing": lambda d: nodes(d)["analyze"]["loop"]["max"].pop("sil1"),
-    "unreachable": lambda d: nodes(d).update(orphan={"role": "sil", "next": "done", "on_fail": "analyze"}),
     "terminal": lambda d: (nodes(d)["done"].update(type="approval", options=["redesign"])),
     "yaml": None,
     "owner": lambda d: d["documents"]["documents"]["coord/spec.md"].pop("owner"),
@@ -143,3 +142,11 @@ def test_every_role_has_prompt_template():
         text = (prompts / role.prompt).read_text()
         for section in ("## 책임", "## 수정 가능", "## 산출물", "## 금지"):
             assert section in text, (role.id, section)
+
+
+def test_unreachable_is_warning():
+    data = sample()
+    nodes(data).update(orphan={"role": "sil", "next": "done", "on_fail": "escalate"})
+    company = models.parse_texts(dump(data))
+    assert [w.rule for w in company.warnings] == ["unreachable"]
+    assert company.warnings[0].where.endswith("orphan")

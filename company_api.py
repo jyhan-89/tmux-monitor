@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import commands
+import json
 import history
 import time
 import yaml
@@ -66,18 +67,18 @@ def read_texts() -> dict[str, str]:
     return {k: kind_path(k).read_text() for k in KINDS if kind_path(k).exists()}
 
 
-def validate(texts: dict[str, str]) -> None:
+def validate(texts: dict[str, str]) -> list[models.Issue]:
     if all(k in texts for k in KINDS):
-        models.parse_texts(texts)
-        return
-    issues = []
+        return models.parse_texts(texts).warnings
+    issues, warnings = [], []
     for k, text in texts.items():
         try:
-            models.PARSERS[k](text)
+            warnings += getattr(models.PARSERS[k](text), "warnings", [])
         except models.DefinitionError as e:
             issues += e.issues
     if issues:
         raise models.DefinitionError(issues)
+    return warnings
 
 
 def git_commit(kind: str) -> None:
@@ -147,8 +148,7 @@ def orchestrator_alive() -> dict:
 def summary(_: dict = Depends(tokens.require("company.read"))):
     texts = read_texts()
     try:
-        validate(texts)
-        issues = []
+        issues = [i.as_dict() for i in validate(texts)]
     except models.DefinitionError as e:
         issues = [i.as_dict() for i in e.issues]
     return {"exists": {k: k in texts for k in KINDS}, "complete": len(texts) == len(KINDS), "issues": issues,
@@ -279,6 +279,34 @@ def model(_: dict = Depends(tokens.require("company.read"))):
     return out
 
 
+def layout_path() -> Path:
+    return tokens.company_dir() / "layout.json"
+
+
+@router.get("/layout")
+def get_layout(_: dict = Depends(tokens.require("company.read"))):
+    try:
+        return json.loads(layout_path().read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"templates": {}}
+
+
+class Layout(BaseModel):
+    templates: dict[str, dict[str, list[float]]] = {}
+
+
+@router.put("/layout")
+def put_layout(body: Layout, _: dict = Depends(tokens.require("company.write"))):
+    clean = {t: {k: [round(float(v[0])), round(float(v[1]))] for k, v in nodes.items() if len(v) == 2}
+             for t, nodes in body.templates.items()}
+    folder = tokens.company_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = layout_path().with_suffix(".tmp")
+    tmp.write_text(json.dumps({"templates": clean}, ensure_ascii=False, indent=1))
+    tmp.replace(layout_path())
+    return {"ok": True}
+
+
 @router.get("/{kind}")
 def get_kind(kind: str, _: dict = Depends(tokens.require("company.read"))):
     check_kind(kind)
@@ -345,7 +373,7 @@ def put_kind(kind: str, body: Definition, _: dict = Depends(tokens.require("comp
     check_kind(kind)
     texts = {**read_texts(), kind: body.text}
     try:
-        validate(texts)
+        warnings = validate(texts)
     except models.DefinitionError as e:
         raise HTTPException(400, {"message": "정의 검증에 실패했습니다", "issues": [i.as_dict() for i in e.issues]})
     folder = tokens.company_dir()
@@ -354,4 +382,4 @@ def put_kind(kind: str, body: Definition, _: dict = Depends(tokens.require("comp
     tmp.write_text(body.text)
     os.replace(tmp, kind_path(kind))
     git_commit(kind)
-    return {"ok": True}
+    return {"ok": True, "warnings": [w.as_dict() for w in warnings]}

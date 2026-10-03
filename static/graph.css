@@ -107,3 +107,20 @@
 .gchip.ghost { position:fixed; z-index:200; pointer-events:none; opacity:.85; border-color:var(--accent); }
 #gcanvas .gnode.drop rect { stroke:var(--accent); stroke-width:2; fill:rgba(79,156,249,.18); }
 #gcanvas .gnode.assigned rect { stroke-dasharray:4 2; }
+#gcanvas .gbg { fill:transparent; }
+#gcanvas #gproc { touch-action:none; user-select:none; -webkit-user-select:none; }
+#gcanvas .pnode { touch-action:none; }
+#gcanvas .pnode.drop rect { stroke:var(--accent); stroke-width:3; fill:rgba(79,156,249,.2); }
+#gcanvas .gport { stroke:var(--bg); stroke-width:2; cursor:crosshair; opacity:.55; }
+#gcanvas .pnode:hover .gport, #gcanvas .pnode.sel .gport { opacity:1; }
+#gcanvas .gport.next { fill:var(--fg); }
+#gcanvas .gport.fail { fill:var(--err); }
+#gcanvas .gport.exceed { fill:var(--warn); }
+#gcanvas .gehit { fill:none; stroke:transparent; stroke-width:12; cursor:pointer; }
+#gcanvas .gedge.sel { stroke-width:3; }
+#gcanvas .gedge.temp { stroke:var(--accent); stroke-width:2; stroke-dasharray:4 3; fill:none; pointer-events:none; }
+#gcanvas .pstart { fill:var(--ok); font-size:10px; font-weight:600; }
+#gcanvas .ghint { color:var(--dim); font-size:12px; margin:6px 8px; max-width:640px; }
+@media (pointer:coarse) { #gcanvas .gport { opacity:1; r:9; } }
+#gcanvas .pnode.orphan { opacity:.5; }
+#gcanvas .pnode.orphan rect { stroke-dasharray:4 3; }

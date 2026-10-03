@@ -9,6 +9,7 @@ VERSION = 1
 IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 APPROVAL_OPTIONS = {"redesign", "drop", "override"}
 SPECIAL_SENDERS = {"orchestrator", "any"}
+WARN_RULES = {"unreachable"}
 
 
 @dataclass
@@ -198,8 +199,10 @@ def _parse(text: str, where: str, r: _Reader) -> dict:
 
 
 def _finish(r: _Reader, value):
-    if r.issues:
+    if any(i.rule not in WARN_RULES for i in r.issues):
         raise DefinitionError(r.issues)
+    if value is not None:
+        value.warnings = [i for i in r.issues if i.rule in WARN_RULES]
     return value
 
 
@@ -481,4 +484,5 @@ def parse_texts(texts: dict[str, str]) -> Company:
         raise DefinitionError(issues)
     company = Company(**parsed)
     check_all(company.org, company.process, company.documents)
+    company.warnings = [w for v in parsed.values() for w in getattr(v, "warnings", [])]
     return company

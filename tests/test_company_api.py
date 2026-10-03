@@ -101,3 +101,10 @@ def test_init_example_and_empty(client, tmp_path):
 def test_init_example(client):
     assert client.post("/api/company/init", json={"template": "example"}).status_code == 200
     assert "mw" in client.get("/api/company/model").json()["org"]["divisions"]
+
+
+def test_layout_roundtrip(client):
+    assert client.get("/api/company/layout").json() == {"templates": {}}
+    r = client.put("/api/company/layout", json={"templates": {"feature_dev": {"design": [10.4, 20.6], "bad": [1]}}})
+    assert r.status_code == 200
+    assert client.get("/api/company/layout").json() == {"templates": {"feature_dev": {"design": [10, 21]}}}
