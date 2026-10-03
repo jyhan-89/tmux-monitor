@@ -129,10 +129,11 @@ function renderList() {
   const all = sortSessions(sessions);
   const orgs = all.filter((s) => s.meta?.role);
   const sorted = all.filter((s) => !s.meta?.role);
-  if (orgs.length) renderOrgSections(ul, orgs);
+  if (orgs.length || orgDivisions.length) renderOrgSections(ul, orgs);
   if (!groups.length) {
-    if (orgs.length && sorted.length) ul.appendChild(orgHeader('rest', '세션', sorted, 0, 'rest'));
-    if (!orgs.length || !collapsedGroups.has('org:rest')) for (const s of sorted) ul.appendChild(sessionItem(s, !!orgs.length, orgs.length ? 1 : 0));
+    const sectioned = orgs.length || orgDivisions.length;
+    if (sectioned && sorted.length) ul.appendChild(orgHeader('rest', '세션', sorted, 0, 'rest'));
+    if (!sectioned || !collapsedGroups.has('org:rest')) for (const s of sorted) ul.appendChild(sessionItem(s, !!sectioned, sectioned ? 1 : 0));
     return;
   }
   assignGroupColors();
@@ -154,6 +155,7 @@ function renderList() {
 }
 
 let divisionNames = {};
+let orgDivisions = [];
 
 function orgHeader(key, label, members, depth, kind) {
   const li = document.createElement('li');
@@ -192,24 +194,39 @@ function orgHeader(key, label, members, depth, kind) {
   return li;
 }
 
+function orgHint(text, depth) {
+  const li = document.createElement('li');
+  li.className = 'orghint';
+  li.style.marginLeft = `${depth * 12}px`;
+  li.textContent = text;
+  li.onclick = () => { if (typeof openGraph === 'function') openGraph(); };
+  return li;
+}
+
 function renderOrgSections(ul, all) {
   let orgs = all;
-  const divs = [...new Set(orgs.map((s) => s.meta.division))].sort((a, b) => (a === '*') - (b === '*') || a.localeCompare(b));
   const hq = orgs.filter((s) => s.meta.dept === 'hq');
   if (hq.length) {
     ul.appendChild(orgHeader('hq', '🏛 본사', hq, 0, 'org'));
     if (!collapsedGroups.has('org:hq')) for (const s of hq) ul.appendChild(sessionItem(s, true, 1));
     orgs = orgs.filter((s) => s.meta.dept !== 'hq');
   }
-  for (const div of divs.filter((d) => orgs.some((s) => s.meta.division === d))) {
+  const defined = orgDivisions.map((d) => d.id);
+  const divs = [...new Set([...defined, ...orgs.map((s) => s.meta.division).filter((d) => d !== '*')])];
+  if (orgs.some((s) => s.meta.division === '*')) divs.push('*');
+  for (const div of divs) {
     const inDiv = orgs.filter((s) => s.meta.division === div);
     const label = div === '*' ? '🏢 전사 공통' : `🏢 ${div}${divisionNames[div] ? ` · ${divisionNames[div]}` : ''}`;
     ul.appendChild(orgHeader(div, label, inDiv, 0, 'org'));
     if (collapsedGroups.has(`org:${div}`)) continue;
+    if (!inDiv.length) {
+      ul.appendChild(orgHint('세션 없음 · 🏢 조직도에서 만들거나 배정', 1));
+      continue;
+    }
     const depts = [...new Set(inDiv.map((s) => s.meta.dept))].sort();
     for (const dept of depts) {
       const members = inDiv.filter((s) => s.meta.dept === dept);
-      if (div === '*' || depts.length === 1 && dept === 'shared') {
+      if (div === '*') {
         for (const s of members) ul.appendChild(sessionItem(s, true, 1));
         continue;
       }
@@ -638,8 +655,9 @@ async function loadInboxBadge() {
   try {
     const divs = await api('GET', '/company/divisions');
     const names = Object.fromEntries(divs.map((d) => [d.id, d.name]));
-    if (JSON.stringify(names) !== JSON.stringify(divisionNames)) {
+    if (JSON.stringify(divs) !== JSON.stringify(orgDivisions)) {
       divisionNames = names;
+      orgDivisions = divs;
       renderList();
     }
   } catch {}

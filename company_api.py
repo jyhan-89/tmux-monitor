@@ -176,7 +176,7 @@ def divisions(_: dict = Depends(tokens.require("company.read"))):
         org = models.parse_org(p.read_text())
     except models.DefinitionError:
         return []
-    return [{"id": d.id, "name": d.name} for d in org.divisions.values()]
+    return [{"id": d.id, "name": d.name, "depts": list(d.depts)} for d in org.divisions.values()]
 
 
 @router.get("/sessions")
