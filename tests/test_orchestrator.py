@@ -57,6 +57,7 @@ class FakeServer:
         self.wake_texts = []
         self.restarted = []
         self.approvals = {}
+        self.reports = []
 
     def stopped(self):
         return self.is_stopped
@@ -88,6 +89,10 @@ class FakeServer:
     def wake(self, session, text=None):
         self.woken.append(session)
         self.wake_texts.append(text)
+        return True
+
+    def report(self, text):
+        self.reports.append(text)
         return True
 
     def set_node(self, session, node):
@@ -437,3 +442,19 @@ def test_commands_start_transition_restored(env):
     commands.put("transition", division="mw", feature="svc_a", to="nowhere")
     orch.tick()
     assert orchestrator.load("mw", "svc_a")["node"] == "review"
+
+
+def test_reports_to_ceo_on_steps_and_daily(env, monkeypatch):
+    orch, server, gates, _ = env
+    monkeypatch.setenv("TMUX_WEB_DAILY_REPORT", "")
+    orch.tick()
+    server.finish_all()
+    orch.tick()
+    assert any("[단계 보고] mw/svc_a: implement 통과 → review" in r for r in server.reports)
+    monkeypatch.setenv("TMUX_WEB_DAILY_REPORT", "00:00")
+    n = len(server.reports)
+    orch.tick()
+    assert any(r.startswith("[일일 보고]") for r in server.reports[n:])
+    m = len(server.reports)
+    orch.tick()
+    assert not any(r.startswith("[일일 보고]") for r in server.reports[m:])

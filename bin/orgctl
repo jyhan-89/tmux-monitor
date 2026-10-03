@@ -141,6 +141,26 @@ def cmd_approvals(_a) -> None:
         print(f"{x['id']} [{x['kind']}] {x['instance']} · {x['node']}\n  {x['summary']}\n  선택지: {', '.join(x['options'])}")
 
 
+def cmd_decide(a) -> None:
+    res = call("POST", f"/approvals/{urllib.parse.quote(a.id)}/decide", {"decision": a.decision, "reason": a.reason})
+    print(f"{res['id']}: {res['decision']}" + (f" ({res['reason']})" if res.get("reason") else ""))
+
+
+def cmd_notify(a) -> None:
+    res = call("POST", "/control/notify", {"title": a.title, "body": a.body})
+    print(f"알림 {res.get('sent', 0)}건 보냄")
+
+
+def cmd_stop(a) -> None:
+    res = call("POST", "/control/stop_all")
+    print(f"비상 정지: Claude 세션 {len(res.get('sessions', []))}개에 정지 신호")
+
+
+def cmd_resume(a) -> None:
+    res = call("POST", "/control/resume")
+    print("비상 정지 해제" if res.get("resumed") else "정지 상태가 아닙니다")
+
+
 def cmd_history(a) -> None:
     q = {k: v for k, v in (("session", a.session), ("type", a.type), ("limit", str(a.limit))) if v}
     for e in call("GET", "/history?" + urllib.parse.urlencode(q)):
@@ -176,6 +196,17 @@ def main(argv: list[str]) -> int:
     x.add_argument("args", nargs="*")
     x.set_defaults(fn=cmd_session)
     sub.add_parser("approvals").set_defaults(fn=cmd_approvals)
+    x = sub.add_parser("decide")
+    x.add_argument("id")
+    x.add_argument("decision")
+    x.add_argument("--reason", default=None)
+    x.set_defaults(fn=cmd_decide)
+    x = sub.add_parser("notify")
+    x.add_argument("title")
+    x.add_argument("body", nargs="?", default="")
+    x.set_defaults(fn=cmd_notify)
+    sub.add_parser("stop").set_defaults(fn=cmd_stop)
+    sub.add_parser("resume").set_defaults(fn=cmd_resume)
     x = sub.add_parser("history")
     x.add_argument("--session")
     x.add_argument("--type")

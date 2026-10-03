@@ -118,7 +118,7 @@ def create(dtype: str, sender: str, to: str, body: str, priority: str = "normal"
         t = types.get(dtype)
         if not t:
             raise DirectiveError(400, f"알 수 없는 지시서 종류: {dtype}")
-        if sender != "user":
+        if sender not in ("user", "ceo"):
             sender_role = "orchestrator" if sender == "orchestrator" else role_of(sender)
             if t.sender != "any" and sender_role != t.sender:
                 raise DirectiveError(403, f"'{dtype}' 지시서는 {t.sender}만 쓸 수 있습니다")

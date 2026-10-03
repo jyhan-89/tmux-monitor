@@ -64,6 +64,12 @@ class Server:
     def deliver(self, session: str) -> None:
         self.call("POST", f"/directives/deliver/{session}")
 
+    def report(self, text: str) -> bool:
+        try:
+            return self.call("POST", "/control/ceo", {"text": text})["woken"]
+        except ApiError:
+            return False
+
     def wake(self, session: str, text: str | None = None) -> bool:
         return self.call("POST", f"/control/wake/{session}", {"text": text} if text else None)["woken"]
 
@@ -237,6 +243,7 @@ class Orchestrator:
         company = self.server.company()
         for cmd in commands.take():
             self.command(company, cmd)
+        self.daily_report(now)
         if self.server.stopped():
             return
         sessions = self.server.role_sessions()
@@ -248,6 +255,26 @@ class Orchestrator:
                 active += self.step(company, sessions, inst, now, active)
             except ApiError as e:
                 log.warning("%s/%s: %s", inst["division"], inst["feature"], e)
+
+    def daily_report(self, now: float) -> None:
+        at = os.environ.get("TMUX_WEB_DAILY_REPORT", "18:00")
+        if not at:
+            return
+        try:
+            hh, mm = (int(x) for x in at.split(":"))
+        except ValueError:
+            return
+        t = datetime.fromtimestamp(now).astimezone()
+        if (t.hour, t.minute) < (hh, mm):
+            return
+        mark = state_dir() / "daily_report"
+        today = t.strftime("%Y-%m-%d")
+        if mark.exists() and mark.read_text().strip() == today:
+            return
+        if self.server.report(f"[일일 보고] {today}: orgctl status와 orgctl history로 오늘 진행·결재·문제를 정리해 "
+                              f"reports/daily/{today}.md에 쓰고 orgctl notify로 세 줄 요약을 알리세요."):
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text(today)
 
     def command(self, company: models.Company, cmd: dict) -> None:
         try:
@@ -550,7 +577,11 @@ class Orchestrator:
             inst["source_node"] = None
         history.record({"type": "node_done", "session": "-", "division": inst["division"], "feature": inst["feature"],
                         "node": node.id, "result": "pass" if passed else "fail", "next": target})
-        self.move(inst, target, note="" if passed else inst.get("note", ""))
+        note = "" if passed else (inst.get("note") or "")
+        self.server.report(f"[단계 보고] {inst['division']}/{inst['feature']}: {node.id} {'통과' if passed else '실패'} → {target}."
+                           + (f" 사유: {note.splitlines()[0][:160]}" if note else "")
+                           + " 사용자에게 알릴 만하면 orgctl notify로 짧게 알리세요.")
+        self.move(inst, target, note=note)
 
     def move(self, inst: dict, target: str, note: str = "") -> None:
         inst["prev_node"] = inst["node"]
@@ -562,6 +593,7 @@ class Orchestrator:
     def finish(self, inst: dict, status: str) -> None:
         inst["status"] = status
         save(inst)
+        self.server.report(f"[완료 보고] {inst['division']}/{inst['feature']} 상태 {status}. 결과를 정리해 orgctl notify로 알리세요.")
         history.record({"type": "node_done", "session": "-", "division": inst["division"], "feature": inst["feature"],
                         "node": inst["node"], "result": status})
 

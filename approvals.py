@@ -12,6 +12,7 @@ NEEDS_REASON = {"reject", "revise", "redesign", "drop", "override"}
 DEFAULT_OPTIONS = {"gate": ["approve", "reject", "revise"], "escalate": ["redesign", "drop", "override"],
                    "needs_input": ["answered"], "external": ["approve", "reject"]}
 notify = None
+on_create = None
 
 
 class ApprovalError(Exception):
@@ -88,6 +89,11 @@ def create(kind: str, instance: str, node: str, summary: str, evidence: list[str
         _write(a)
     history.record({"type": "approval_request", "session": session or "-", "approval": a["id"], "kind": kind,
                     "instance": instance, "node": node})
+    if on_create:
+        try:
+            on_create(a)
+        except Exception:
+            pass
     if notify:
         division, _, feature = instance.partition("/")
         title = {"gate": "결재 요청", "escalate": "에스컬레이션", "needs_input": "확인 필요", "external": "외부 발송 결재"}[kind]

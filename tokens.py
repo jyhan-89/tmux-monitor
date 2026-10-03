@@ -18,7 +18,7 @@ SCOPES: dict[str, set[str]] = {
     "hook": {"event"},
     "session": {"directives.self"},
     "ceo": {"company.read", "company.write", "sessions.launch", "sessions.meta", "history.read", "approvals.manage",
-            "directives.manage", "control"},
+            "approvals.decide", "directives.manage", "control"},
 }
 
 login_check: Callable[[Request], bool] = lambda request: False

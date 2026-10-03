@@ -120,3 +120,14 @@ def test_shared_assignment_applies_to_every_division(env):
     assert sessions_meta.get("bsp")["division"] == "*"
     assert launcher.launch("mw", "shared", "analysis", None, "f")["name"] == "bsp"
     assert assign(c, "autosar", division="*", dept="shared", role="impl", suffix=None).status_code == 400
+
+
+def test_wake_ceo_only_when_claude_running(env, monkeypatch):
+    c, live, sent = env
+    live["ceo"] = "/hq"
+    monkeypatch.setattr(launcher.push, "status", {"ceo": {"state": "shell"}})
+    assert not launcher.wake_ceo("hello") and not sent
+    monkeypatch.setattr(launcher.push, "status", {"ceo": {"state": "idle"}})
+    launcher.approval_to_ceo({"id": "ap-1", "kind": "gate", "instance": "mw/f", "node": "integrate", "summary": "머지\n승인"})
+    typed = [a[-1] for a in sent if a[0] == "send-keys" and "-l" in a][0]
+    assert typed.startswith("[결재 요청] ap-1") and "\n" not in typed and "orgctl decide" in typed

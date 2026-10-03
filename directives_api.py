@@ -12,7 +12,7 @@ any_caller = tokens.require("directives.manage", "directives.self")
 def sender_of(who: dict) -> str:
     if who["role"] == "session":
         return who["session"]
-    return "orchestrator" if who["role"] == "orchestrator" else "user"
+    return {"orchestrator": "orchestrator", "ceo": "ceo"}.get(who["role"], "user")
 
 
 def guard(fn, *args, **kwargs):

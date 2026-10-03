@@ -63,3 +63,11 @@ def test_list_filter_close_and_missing(env):
     assert c.get("/api/approvals/ap-x", headers=orch).status_code == 404
     assert c.get("/api/approvals/../secrets", headers=orch).status_code == 404
     assert create(c, orch, kind="party").status_code == 400
+
+
+def test_ceo_can_decide(env):
+    c, orch, _ = env
+    aid = create(c, orch).json()["id"]
+    ceo = {"Authorization": f"Bearer {tokens.issue('ceo', 'ceo')}"}
+    r = c.post(f"/api/approvals/{aid}/decide", json={"decision": "approve"}, headers=ceo).json()
+    assert r["status"] == "decided" and r["by"] == "ceo"

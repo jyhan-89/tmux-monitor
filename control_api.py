@@ -99,6 +99,15 @@ def api_notify(body: Notice, _: dict = Depends(tokens.require("control"))):
     return {"sent": push.send_all(body.title, body.body)}
 
 
+class CeoNotice(BaseModel):
+    text: str
+
+
+@router.post("/ceo")
+def api_ceo(body: CeoNotice, _: dict = Depends(tokens.require("control"))):
+    return {"woken": launcher.wake_ceo(body.text)}
+
+
 @router.post("/restored")
 def api_restored(_: dict = Depends(tokens.require("control"))):
     history.record({"type": "session_start", "session": "*", "source": "tmux-persist"})

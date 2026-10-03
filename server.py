@@ -33,6 +33,7 @@ from send2trash import send2trash
 import approvals
 import approvals_api
 import auth
+import launcher
 import company_api
 import control_api
 import directives_api
@@ -958,6 +959,7 @@ router.include_router(event_api.router)
 router.include_router(approvals_api.router)
 router.include_router(history_api.router)
 approvals.notify = push.send_all
+approvals.on_create = launcher.approval_to_ceo
 
 
 def set_winsize(fd: int, rows: int, cols: int) -> None:

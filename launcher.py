@@ -423,3 +423,20 @@ def ensure_ceo(start_claude: bool = True) -> dict:
         tmuxctl.tmux("send-keys", "-t", f"={CEO}:", f". {shlex.quote(str(env_file))} && {cmd}", "Enter")
         started = True
     return {"name": CEO, "created": not exists, "started": started, **meta}
+
+
+def wake_ceo(text: str) -> bool:
+    if not tmuxctl.session_exists(CEO):
+        return False
+    if push.status.get(CEO, {}).get("state") not in ("idle", "working", "waiting"):
+        history.record({"type": "status_change", "session": CEO, "to": "unknown", "source": "launcher",
+                        "reason": "ceo_wake_skipped_not_claude"})
+        return False
+    text = " ".join(text.split())
+    return tmuxctl.tmux("send-keys", "-t", f"={CEO}:", "-l", text).returncode == 0 and \
+        tmuxctl.tmux("send-keys", "-t", f"={CEO}:", "Enter").returncode == 0
+
+
+def approval_to_ceo(a: dict) -> None:
+    wake_ceo(f"[결재 요청] {a['id']} ({a['kind']}) {a['instance']} · {a['node']}: {a['summary'][:200]} "
+             f"— orgctl approvals로 확인하고 판단해 orgctl decide로 결정한 뒤 결과를 짧게 보고하세요.")
