@@ -12,6 +12,7 @@ import directives
 import history
 import hooks_install
 import models
+import push
 import sessions_meta
 import tmuxctl
 import tokens
@@ -161,9 +162,49 @@ def write_settings(path: Path, perms: dict, env: dict | None = None) -> None:
     hooks_install.install(path)
 
 
+def assign(name: str, division: str, dept: str, role: str, suffix: str | None = None) -> dict:
+    company = load_company()
+    if dept == "shared":
+        if role not in company.org.shared_roles():
+            raise LaunchError(f"공통 역할 '{role}'이(가) 없습니다")
+        division, suffix = "*", None
+    else:
+        place(company, division, dept, role)
+    sessions = {s["name"]: s for s in tmuxctl.list_sessions()}
+    if name not in sessions:
+        raise LaunchError(f"세션이 없습니다: {name}")
+    current = sessions_meta.get(name)
+    if current and not current.get("assigned"):
+        raise LaunchError(f"이미 역할 세션입니다: {name}")
+    prev = sessions_meta.assigned_to(division, dept, role, suffix)
+    if prev and prev != name:
+        unassign(prev)
+    if current:
+        sessions_meta.unassign(name)
+    meta = sessions_meta.update(name, division=division, dept=dept, role=role, suffix=suffix or None,
+                                worktree=sessions[name]["path"], assigned=True, grouped=True)
+    tokens.write_session_token(name)
+    history.record({"type": "session_assign", "session": name, "division": division, "dept": dept, "role": role,
+                    "suffix": suffix})
+    directives.deliver_pending(name)
+    return {"name": name, **meta}
+
+
+def unassign(name: str) -> dict | None:
+    meta = sessions_meta.unassign(name)
+    if meta:
+        tokens.drop_session_token(name)
+        history.record({"type": "session_unassign", "session": name, "division": meta.get("division"),
+                        "dept": meta.get("dept"), "role": meta.get("role")})
+    return meta
+
+
 def launch(division: str, dept: str, role: str, suffix: str | None = None, feature: str = "", base: str = "main") -> dict:
     company = load_company()
     p = place(company, division, dept, role)
+    assigned = sessions_meta.assigned_to(division, dept, role, suffix)
+    if assigned and tmuxctl.session_exists(assigned):
+        return {"name": assigned, "created": False, "assigned": True, **(sessions_meta.get(assigned) or {})}
     name = tmuxctl.role_session_name(division, dept, role, suffix)
     if tmuxctl.session_exists(name):
         return {"name": name, "created": False, **(sessions_meta.get(name) or {})}
@@ -231,9 +272,23 @@ def ensure_ready(name: str, timeout: float = 40.0) -> bool:
     return False
 
 
+def assigned_wake_text(text: str) -> str:
+    common = prompt_file("prompts/common.md")
+    rule = f" 절차는 {common}를 따른다." if common else ""
+    return (f"{text}: 이 세션은 조직 역할에 배정되어 있다. `{BIN / 'directive'} list`로 지시서를 확인하고,"
+            f" `{BIN / 'directive'} ack/start/done <id> --ref <브랜치@커밋>`으로 처리한다.{rule}")
+
+
 def wake(name: str, text: str = "inbox 확인") -> bool:
     if not tmuxctl.session_exists(name):
         return False
+    if (sessions_meta.get(name) or {}).get("assigned"):
+        state = push.status.get(name, {}).get("state")
+        if state not in ("idle", "working", "waiting"):
+            history.record({"type": "status_change", "session": name, "to": state or "unknown", "source": "launcher",
+                            "reason": "wake_skipped_not_claude"})
+            return False
+        text = assigned_wake_text(text)
     if TRUST_PROMPT.search(screen(name)) and not ensure_ready(name, 15):
         return False
     return tmuxctl.tmux("send-keys", "-t", f"={name}:", "-l", text).returncode == 0 and \
@@ -242,6 +297,9 @@ def wake(name: str, text: str = "inbox 확인") -> bool:
 
 def restart(name: str) -> dict:
     meta = sessions_meta.get(name)
+    if meta and meta.get("assigned"):
+        history.record({"type": "session_stop", "session": name, "source": "launcher", "reason": "restart_skipped_assigned"})
+        return {"name": name, "created": False, "assigned": True, **meta}
     parsed = tmuxctl.parse_role_session(name)
     if not meta or not parsed:
         raise LaunchError(f"역할 세션이 아닙니다: {name}")

@@ -40,21 +40,32 @@ function memberSlots(dept, slot, m) {
   return count > 1 ? Array.from({ length: count }, (_, i) => String(i + 1)) : [null];
 }
 
+function assignedSession(div, dept, role, suffix) {
+  return sessions.find((s) => s.meta?.assigned && (s.meta.division === div || (dept === 'shared' && s.meta.division === '*'))
+    && s.meta.dept === dept && s.meta.role === role && (s.meta.suffix || null) === (suffix || null)) || null;
+}
+
 function roleNodes(div, dept, slot, m) {
   return memberSlots(dept, slot, m).map((suffix) => {
-    const name = [div, dept.key, m.role, suffix].filter(Boolean).join('-');
-    const s = sessionInfo(name);
-    return { kind: 'role', div, dept: dept.key, slot, role: m.role, suffix, name, state: s?.state || 'none', model: m.model };
+    const a = assignedSession(div, dept.key, m.role, suffix);
+    const name = a?.name || [div, dept.key, m.role, suffix].filter(Boolean).join('-');
+    const s = a || sessionInfo(name);
+    return { kind: 'role', div, dept: dept.key, slot, role: m.role, suffix, name, assigned: !!a, state: s?.state || 'none', model: m.model };
   });
+}
+
+function freeSessions() {
+  return sessions.filter((s) => !s.meta).map((s) => s.name).sort((a, b) => a.localeCompare(b, 'ko'));
 }
 
 function nodeSvg(n, x, y, w = NW) {
   const label = n.suffix ? `${n.suffix} · ${n.role}` : n.role;
   const sel = graph.selected?.kind === 'role' && graph.selected.name === n.name ? ' sel' : '';
-  return `<g class="gnode st-${esc(n.state)}${sel}" data-i="${n.i}" transform="translate(${x},${y})">
-    <title>${esc(n.name)} · ${esc(STATE_TEXT[n.state] || '세션 없음')}${n.model ? ` · ${esc(n.model)}` : ''}</title>
+  const shown = n.assigned ? `🔗 ${label}` : label;
+  return `<g class="gnode st-${esc(n.state)}${sel}${n.assigned ? ' assigned' : ''}" data-i="${n.i}" transform="translate(${x},${y})">
+    <title>${n.assigned ? `배정된 세션 ${esc(n.name)}` : esc(n.name)} · ${esc(STATE_TEXT[n.state] || '세션 없음')}${n.model ? ` · ${esc(n.model)}` : ''}</title>
     <rect width="${w}" height="${NH}" rx="6"></rect><circle cx="10" cy="${NH / 2}" r="4"></circle>
-    <text x="20" y="${NH / 2 + 4}">${esc(label.length > 15 ? `${label.slice(0, 14)}…` : label)}</text></g>`;
+    <text x="20" y="${NH / 2 + 4}">${esc(shown.length > 15 ? `${shown.slice(0, 14)}…` : shown)}</text></g>`;
 }
 
 function renderOrg() {
@@ -64,8 +75,9 @@ function renderOrg() {
   const divs = Object.entries(o.divisions || {});
   const first = divs[0]?.[0] || 'x';
   const shared = Object.entries(o.shared || {}).map(([key, m]) => {
-    const real = sessions.find((s) => s.meta?.role === m.role && s.meta?.dept === 'shared');
-    return { kind: 'role', sharedKey: key, div: first, dept: 'shared', slot: 'shared', role: m.role, suffix: null,
+    const a = assignedSession(first, 'shared', m.role, null);
+    const real = a || sessions.find((s) => s.meta?.role === m.role && s.meta?.dept === 'shared');
+    return { kind: 'role', sharedKey: key, div: first, dept: 'shared', slot: 'shared', role: m.role, suffix: null, assigned: !!a,
       name: real?.name || `${first}-shared-${m.role}`, state: real?.state || 'none', model: m.model };
   });
   const divW = 2 * NW + GAP + 4 * PAD;
@@ -280,13 +292,24 @@ function renderGraph() {
     + insts.map((i) => `<option value="${esc(`${i.division}/${i.feature}`)}"${`${i.division}/${i.feature}` === graph.instance ? ' selected' : ''}>${esc(i.feature)} · ${esc(i.node)}</option>`).join('');
   $('gdivsel').hidden = graph.view !== 'process' || !divs.length;
   $('ginstsel').hidden = graph.view !== 'process' || !divs.length;
-  for (const b of document.querySelectorAll('#graph .gtab')) b.classList.toggle('on', b.dataset.view === graph.view);
+  for (const b of document.querySelectorAll('#graph .gvtab')) b.classList.toggle('on', b.dataset.view === graph.view);
   const { svg, nodes } = graph.view === 'org' ? renderOrg() : renderProcess();
   const box = $('gcanvas');
-  box.innerHTML = svg;
+  box.innerHTML = svg + (graph.view === 'org' ? freeStrip() : '');
+  if (graph.view === 'org') bindFreeStrip(nodes);
   $('glegend').innerHTML = graphLegend();
   for (const el of box.querySelectorAll('[data-i]')) {
-    el.addEventListener('click', (e) => { e.stopPropagation(); selectGraphNode(nodes[+el.dataset.i]); });
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const n = nodes[+el.dataset.i];
+      if (graph.picking && n.kind === 'role') {
+        const name = graph.picking;
+        graph.picking = null;
+        assignTo(name, n);
+        return;
+      }
+      selectGraphNode(n);
+    });
   }
   for (const el of box.querySelectorAll('[data-act]')) {
     el.addEventListener('click', (e) => {
@@ -304,6 +327,74 @@ function renderGraph() {
       });
     }
   }
+}
+
+function freeStrip() {
+  const free = freeSessions();
+  const hint = graph.picking ? `'${esc(graph.picking)}'를 배정할 역할 노드를 누르세요 · <a href="#" id="gfreecancel">취소</a>`
+    : '세션을 역할 노드로 끌어다 놓으면 배정됩니다 (폰: 세션을 누른 뒤 역할 노드를 누르기)';
+  return `<div id="gfree"><div class="gfh"><b>조직 밖 세션</b><span>${hint}</span></div>
+    <div class="gfl">${free.map((n) => `<span class="gchip${graph.picking === n ? ' on' : ''}" data-free="${esc(n)}">${esc(n)}</span>`).join('') || '<span class="gdim">없음</span>'}</div></div>`;
+}
+
+function bindFreeStrip(nodes) {
+  const cancel = $('gfreecancel');
+  if (cancel) cancel.onclick = (e) => { e.preventDefault(); graph.picking = null; renderGraph(); };
+  for (const chip of document.querySelectorAll('#gfree .gchip')) {
+    chip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const name = chip.dataset.free;
+      const start = { x: e.clientX, y: e.clientY };
+      let ghost = null;
+      let over = null;
+      const move = (ev) => {
+        if (!ghost && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return;
+        if (!ghost) {
+          ghost = chip.cloneNode(true);
+          ghost.className = 'gchip ghost';
+          document.body.appendChild(ghost);
+        }
+        ghost.style.left = `${ev.clientX + 8}px`;
+        ghost.style.top = `${ev.clientY + 8}px`;
+        const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('#gcanvas .gnode');
+        if (over !== target) {
+          over?.classList.remove('drop');
+          over = target;
+          over?.classList.add('drop');
+        }
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        if (!ghost) {
+          graph.picking = graph.picking === name ? null : name;
+          renderGraph();
+          return;
+        }
+        ghost.remove();
+        over?.classList.remove('drop');
+        if (over) assignTo(name, nodes[+over.dataset.i]);
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+  }
+}
+
+async function assignTo(session, n) {
+  if (!n || n.kind !== 'role') return;
+  if (n.assigned && n.name !== session && !confirm(`'${n.name}' 대신 '${session}'를 이 자리에 배정할까요?`)) return;
+  if (!n.assigned && sessionInfo(n.name) && !confirm(`이 자리에는 자동 생성된 세션 '${n.name}'이 있습니다. 앞으로 '${session}'를 쓰도록 배정할까요?`)) return;
+  try {
+    await api('POST', '/company/assign', { session, division: n.dept === 'shared' ? '*' : n.div, dept: n.dept, role: n.role, suffix: n.suffix || null });
+  } catch (e) {
+    return toast(e.message, 4000);
+  }
+  toast(`'${session}'를 ${n.dept}의 ${n.role}${n.suffix ? ` (${n.suffix})` : ''}에 배정했습니다`);
+  await refresh();
+  graph.selected = { ...n, name: session, assigned: true };
+  await loadGraph();
+  renderGraphPanel();
 }
 
 function field(label, id, value, type = 'text', extra = '') {
@@ -368,6 +459,12 @@ const PANELS = {
       html: `${panelHead(sel.role, sel.name)}
         <p class="gdim">${s ? `세션 ${esc(STATE_TEXT[s.state] || s.state || '')}${s.meta?.node ? ` · 노드 ${esc(s.meta.node)}` : ''}` : '세션 없음'}</p>
         ${s ? '<button id="gpopen" class="primary">세션 열기</button>' : ''}
+        <h4>세션 배정</h4>
+        ${sel.assigned ? `<p class="gdim">배정됨: <b>${esc(sel.name)}</b> · 오케스트레이터가 이 자리의 일을 이 세션에 맡깁니다</p>
+          <div class="gpactions"><button id="gpunassign">배정 해제</button></div>`
+    : `${selectField('기존 세션', 'gf-assign', '', [['', '(선택)'], ...freeSessions().map((n) => [n, n])])}
+          <div class="gpactions"><button id="gpassign">배정</button></div>
+          <p class="gdim">${s ? '지금은 자동 생성된 역할 세션이 있습니다. ' : ''}배정하지 않으면 필요할 때 새 세션을 만듭니다.</p>`}
         <h4>이 자리 (${esc(sel.sharedKey ? `공통 ${sel.sharedKey}` : `${sel.dept} ${sel.slot === 'lead' ? '책임자' : '구성원'}`)})</h4>
         ${field('모델', 'gf-model', member.model || '')}${field('인원 (count)', 'gf-count', member.count || 1, 'number', ' min="1"')}
         <h4>역할 ${esc(sel.role)} (같은 역할의 모든 자리에 적용)</h4>
@@ -378,6 +475,22 @@ const PANELS = {
         <div class="gpactions"><button id="gpsave" class="primary">저장</button><button id="gpdel" class="danger">이 자리 삭제</button></div>`,
       bind() {
         if (s) $('gpopen').onclick = () => { closeGraph(); openSession(s.name); };
+        if (sel.assigned) {
+          $('gpunassign').onclick = async () => {
+            if (!confirm(`'${sel.name}' 배정을 해제할까요? 세션은 그대로 남습니다.`)) return;
+            try { await api('DELETE', `/company/assign/${enc(sel.name)}`); } catch (e) { return toast(e.message); }
+            toast('배정을 해제했습니다');
+            await refresh();
+            graph.selected = null;
+            await loadGraph();
+            renderGraphPanel();
+          };
+        } else {
+          $('gpassign').onclick = () => {
+            const name = $('gf-assign').value;
+            if (name) assignTo(name, sel);
+          };
+        }
         $('gpsave').onclick = () => {
           const count = Math.max(1, parseInt($('gf-count').value, 10) || 1);
           const lists = { allowed_tools: textList($('gf-tools').value), can_edit: textList($('gf-can').value), cannot_edit: textList($('gf-cannot').value) };
@@ -801,7 +914,7 @@ function closeGraph() {
 
 $('graphbtn').onclick = () => ($('graph').hidden ? openGraph() : closeGraph());
 $('gclose').onclick = closeGraph;
-for (const b of document.querySelectorAll('#graph .gtab')) {
+for (const b of document.querySelectorAll('#graph .gvtab')) {
   b.onclick = () => {
     graph.view = b.dataset.view;
     selectGraphNode(null);

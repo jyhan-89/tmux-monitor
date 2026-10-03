@@ -95,6 +95,31 @@ def ensure_hook_token() -> str:
     return ensure_token("hook")
 
 
+def session_token_file(name: str) -> Path:
+    return history_dir() / "sessions" / f"{name}.token"
+
+
+def history_dir() -> Path:
+    import history
+    return history.DATA_DIR
+
+
+def write_session_token(name: str) -> str:
+    token = issue("session", name)
+    f = session_token_file(name)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(f.parent, 0o700)
+    fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as out:
+        out.write(token + "\n")
+    return token
+
+
+def drop_session_token(name: str) -> None:
+    revoke_session(name)
+    session_token_file(name).unlink(missing_ok=True)
+
+
 def lookup(token: str | None) -> dict | None:
     if not token:
         return None

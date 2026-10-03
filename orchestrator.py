@@ -479,6 +479,8 @@ class Orchestrator:
                 self.server.restart(name)
             else:
                 parsed = name.split("-")
+                if len(parsed) < 3:
+                    continue
                 self.server.launch(parsed[0], parsed[1], parsed[2], parsed[3] if len(parsed) > 3 else None, inst["feature"])
             self.server.deliver(name)
             self.server.wake(name, "inbox 지시서 상태 확인 후 계속")

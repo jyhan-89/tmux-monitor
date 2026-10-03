@@ -4,7 +4,7 @@ import store
 from tmuxctl import parse_role_session
 
 FILE = "sessions_meta.json"
-FIELDS = ("division", "dept", "role", "branch", "worktree", "node", "grouped")
+FIELDS = ("division", "dept", "role", "suffix", "branch", "worktree", "node", "grouped", "assigned")
 
 
 def all_meta() -> dict[str, dict]:
@@ -62,3 +62,28 @@ def adopt(names: list[str], known: Callable[[dict], bool] = lambda parsed: False
     if changed:
         store.save(FILE, data)
     return changed
+
+
+def slot_key(division: str, dept: str, role: str, suffix: str | None) -> tuple:
+    return (division, dept, role, suffix or None)
+
+
+def assigned_to(division: str, dept: str, role: str, suffix: str | None) -> str | None:
+    want = slot_key(division, dept, role, suffix)
+    for name, m in all_meta().items():
+        if not m.get("assigned"):
+            continue
+        div = division if m.get("division") == "*" and dept == "shared" else m.get("division")
+        if slot_key(div, m.get("dept"), m.get("role"), m.get("suffix")) == want:
+            return name
+    return None
+
+
+def unassign(name: str) -> dict | None:
+    data = all_meta()
+    meta = data.get(name)
+    if not meta or not meta.get("assigned"):
+        return None
+    data.pop(name)
+    store.save(FILE, data)
+    return meta

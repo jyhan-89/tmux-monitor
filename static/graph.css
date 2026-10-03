@@ -1,7 +1,7 @@
 #graph { position:absolute; inset:0; z-index:25; background:var(--bg); display:flex; flex-direction:column; }
 #graph[hidden] { display:none; }
 #graph .ghead { display:flex; align-items:center; gap:6px; padding:6px 8px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
-#graph .gtab.on { border-color:var(--accent); color:var(--accent); }
+#graph .gvtab.on { border-color:var(--accent); color:var(--accent); }
 #graph select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; font-size:13px; }
 #graph select[hidden] { display:none; }
 #glegend { flex:1; display:flex; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--dim); }
@@ -91,3 +91,13 @@
 #gpanel .glist { margin:0; padding-left:16px; font-size:12px; }
 #gpanel .newrole[hidden], #gpanel [hidden] { display:none; }
 #gpanel button.danger { color:var(--err); border-color:rgba(240,113,120,.5); }
+#gfree { margin:12px 8px; padding:8px 10px; border:1px dashed var(--line); border-radius:8px; max-width:900px; }
+#gfree .gfh { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; font-size:12px; color:var(--dim); margin-bottom:6px; }
+#gfree .gfh b { color:var(--fg); }
+#gfree .gfh a { color:var(--accent); }
+#gfree .gfl { display:flex; gap:6px; flex-wrap:wrap; }
+.gchip { display:inline-block; padding:3px 10px; border:1px solid var(--line); border-radius:12px; background:#2a2d33; font-size:12px; cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none; }
+.gchip.on { border-color:var(--accent); color:var(--accent); }
+.gchip.ghost { position:fixed; z-index:200; pointer-events:none; opacity:.85; border-color:var(--accent); }
+#gcanvas .gnode.drop rect { stroke:var(--accent); stroke-width:2; fill:rgba(79,156,249,.18); }
+#gcanvas .gnode.assigned rect { stroke-dasharray:4 2; }

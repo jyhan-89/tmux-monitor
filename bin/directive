@@ -7,7 +7,33 @@ import urllib.error
 import urllib.request
 
 URL = os.environ.get("TMUX_WEB_URL", "http://127.0.0.1:8765/dev").rstrip("/")
-TOKEN = os.environ.get("TMUX_WEB_TOKEN", "")
+
+
+def session_name() -> str:
+    name = os.environ.get("TMUX_WEB_SESSION", "")
+    if name or not os.environ.get("TMUX"):
+        return name
+    import subprocess
+    args = ["tmux", "display-message", "-p"] + (["-t", os.environ["TMUX_PANE"]] if os.environ.get("TMUX_PANE") else []) + ["#S"]
+    r = subprocess.run(args, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def find_token() -> str:
+    if os.environ.get("TMUX_WEB_TOKEN"):
+        return os.environ["TMUX_WEB_TOKEN"]
+    name = session_name()
+    if not name or "/" in name:
+        return ""
+    data = os.environ.get("TMUX_WEB_DATA") or os.path.expanduser("~/.local/share/tmux-web")
+    try:
+        with open(os.path.join(data, "sessions", f"{name}.token")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+TOKEN = find_token()
 
 
 def call(method: str, path: str, body: dict | None = None):

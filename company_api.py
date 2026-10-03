@@ -207,6 +207,30 @@ def update_meta(name: str, body: MetaUpdate, _: dict = Depends(tokens.require("s
     return sessions_meta.update(name, node=body.node)
 
 
+class Assign(BaseModel):
+    session: str
+    division: str
+    dept: str
+    role: str
+    suffix: str | None = None
+
+
+@router.post("/assign")
+def assign_session(body: Assign, _: dict = Depends(tokens.require("company.write"))):
+    try:
+        return launcher.assign(body.session, body.division, body.dept, body.role, body.suffix)
+    except (launcher.LaunchError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/assign/{name}")
+def unassign_session(name: str, _: dict = Depends(tokens.require("company.write"))):
+    meta = launcher.unassign(name)
+    if meta is None:
+        raise HTTPException(404, "배정된 세션이 아닙니다")
+    return {"ok": True}
+
+
 @router.post("/sessions/{name}/restart")
 def restart_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
     try:

@@ -296,6 +296,10 @@ def api_rename_session(name: str, body: Rename):
     run("rename-session", "-t", f"={name}", new)
     store.rename_session(name, new)
     sessions_meta.rename(name, new)
+    tokens.rename_session(name, new)
+    old_file = tokens.session_token_file(name)
+    if old_file.exists():
+        old_file.replace(tokens.session_token_file(new))
     return {"ok": True}
 
 
@@ -304,6 +308,7 @@ def api_kill_session(name: str):
     run("kill-session", "-t", f"={name}")
     store.forget_session(name)
     sessions_meta.forget(name)
+    tokens.drop_session_token(name)
     return {"ok": True}
 
 
