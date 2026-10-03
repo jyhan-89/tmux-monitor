@@ -224,6 +224,16 @@ dialog textarea { font:13px ui-monospace, monospace; resize:vertical; }
 #layoutchip.none .lcname { font-weight:normal; }
 #layoutchip.none .lcdot { display:none; }
 @media (max-width:768px) { #layoutchip { max-width:90px; } #layoutchip .lcicon { display:none; } }
+@media (max-width:520px) {
+  #bar { gap:4px; padding:6px; }
+  #bar > button { padding:4px 7px; }
+  #desks { flex:0 1 auto; min-width:0; overflow-x:auto; scrollbar-width:none; }
+  #desks::-webkit-scrollbar { display:none; }
+  #desks > * { flex:none; }
+  #layoutchip.none .lcname { display:none; }
+  #layoutchip.none .lcicon { display:inline; }
+  #layoutchip { max-width:72px; padding:3px 7px; }
+}
 .desk.add.linked { color:var(--ok); border-color:rgba(76,195,138,.5); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #persistdlg .actions { margin:10px 0; }
 #persistlist { list-style:none; margin:0; padding:0; max-height:min(55dvh, 460px); overflow:auto; border:1px solid var(--line); border-radius:6px; }
