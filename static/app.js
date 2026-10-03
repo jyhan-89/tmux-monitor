@@ -207,7 +207,7 @@ function renderOrgSections(ul, all) {
   let orgs = all;
   const hq = orgs.filter((s) => s.meta.dept === 'hq');
   if (hq.length) {
-    ul.appendChild(orgHeader('hq', '🏛 본사', hq, 0, 'org'));
+    ul.appendChild(orgHeader('hq', '🏛 조직 관리', hq, 0, 'org'));
     if (!collapsedGroups.has('org:hq')) for (const s of hq) ul.appendChild(sessionItem(s, true, 1));
     orgs = orgs.filter((s) => s.meta.dept !== 'hq');
   }

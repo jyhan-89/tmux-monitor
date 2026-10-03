@@ -96,7 +96,7 @@ function renderOrg() {
   hqNode.i = nodes.push(hqNode) - 1;
   const selHq = graph.selected?.kind === 'hq' ? ' sel' : '';
   parts.push(`<g transform="translate(8,${y})"><rect class="gbox hq${selHq}" width="${totalW}" height="${NH + 34}" rx="8" data-act="hq"></rect>
-    <text class="gtitle click" x="${PAD}" y="18" data-act="hq">🏛 본사 ✎</text>${nodeSvg(hqNode, PAD, 26)}
+    <text class="gtitle click" x="${PAD}" y="18" data-act="hq">🏛 조직 관리 ✎</text>${nodeSvg(hqNode, PAD, 26)}
     <text class="gsub" x="${PAD + NW + GAP}" y="${26 + NH / 2 + 4}">${esc(PERMISSION_MODES.find(([k]) => k === (o.hq?.permission_mode || 'dontAsk'))?.[1] || '')}</text></g>`);
   y += NH + 34 + 12;
   const rows = Math.max(1, Math.ceil(shared.length / cols));
