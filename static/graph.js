@@ -18,6 +18,13 @@ const IDENT = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)',
   'Bash(git status:*)', 'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(directive:*)'];
 
+const PERMISSION_MODES = [
+  ['dontAsk', '목록 밖은 거부 (묻지 않음, 기본)'],
+  ['default', '목록 밖은 매번 묻기'],
+  ['acceptEdits', '파일 수정은 자동 허용'],
+  ['plan', '계획만 (수정·실행 안 함)'],
+  ['bypassPermissions', '모두 허용 (--dangerously-skip-permissions)'],
+];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const listText = (v) => (Array.isArray(v) ? v.join('\n') : '');
 const textList = (v) => v.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
@@ -84,6 +91,14 @@ function renderOrg() {
   const totalW = Math.max(divs.length, 1) * (divW + GAP) - GAP;
   const cols = Math.max(2, Math.floor((totalW - 2 * PAD + GAP) / (NW + GAP)));
   let y = 8;
+  const ceo = sessionInfo('ceo');
+  const hqNode = { kind: 'hq', name: 'ceo', role: '사장', suffix: null, state: ceo?.state || 'none', model: o.hq?.model };
+  hqNode.i = nodes.push(hqNode) - 1;
+  const selHq = graph.selected?.kind === 'hq' ? ' sel' : '';
+  parts.push(`<g transform="translate(8,${y})"><rect class="gbox hq${selHq}" width="${totalW}" height="${NH + 34}" rx="8" data-act="hq"></rect>
+    <text class="gtitle click" x="${PAD}" y="18" data-act="hq">🏛 본사 ✎</text>${nodeSvg(hqNode, PAD, 26)}
+    <text class="gsub" x="${PAD + NW + GAP}" y="${26 + NH / 2 + 4}">${esc(PERMISSION_MODES.find(([k]) => k === (o.hq?.permission_mode || 'dontAsk'))?.[1] || '')}</text></g>`);
+  y += NH + 34 + 12;
   const rows = Math.max(1, Math.ceil(shared.length / cols));
   const sh = 26 + rows * (NH + GAP) + PAD;
   const selShared = graph.selected?.kind === 'shared' ? ' sel' : '';
@@ -499,6 +514,10 @@ function renderGraph() {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       const n = nodes[+el.dataset.i];
+      if (n.kind === 'hq') {
+        selectGraphNode({ kind: 'hq', name: 'ceo' });
+        return;
+      }
       if (graph.picking && n.kind === 'role') {
         const name = graph.picking;
         graph.picking = null;
@@ -513,6 +532,7 @@ function renderGraph() {
       e.stopPropagation();
       const a = el.dataset.act;
       if (a === 'shared') selectGraphNode({ kind: 'shared' });
+      if (a === 'hq') selectGraphNode({ kind: 'hq', name: 'ceo' });
       if (a === 'div') selectGraphNode({ kind: 'div', div: el.dataset.div });
       if (a === 'dept') selectGraphNode({ kind: 'dept', div: el.dataset.div, dept: el.dataset.dept });
     });
@@ -670,6 +690,9 @@ const PANELS = {
         ${field('allowed_tools (한 줄에 하나)', 'gf-tools', listText(role.allowed_tools), 'textarea')}
         ${field('can_edit (한 줄에 하나)', 'gf-can', listText(role.can_edit), 'textarea')}
         ${field('cannot_edit (한 줄에 하나)', 'gf-cannot', listText(role.cannot_edit), 'textarea')}
+        ${selectField('권한 모드', 'gf-mode', role.permission_mode || 'dontAsk', PERMISSION_MODES)}
+        ${field('거부할 도구 (한 줄에 하나, 예: Bash(rm:*))', 'gf-deny', listText(role.deny_tools), 'textarea')}
+        <p class="gdim">권한을 바꾼 뒤에는 세션에서 '설정 다시 적용' → 'Claude 다시 시작'을 눌러야 반영됩니다.</p>
         <div class="gpactions"><button id="gpsave" class="primary">저장</button><button id="gpdel" class="danger">이 자리 삭제</button></div>`,
       bind() {
         if (s) $('gpopen').onclick = () => { closeGraph(); openSession(s.name); };
@@ -692,7 +715,9 @@ const PANELS = {
         }
         $('gpsave').onclick = () => {
           const count = Math.max(1, parseInt($('gf-count').value, 10) || 1);
-          const lists = { allowed_tools: textList($('gf-tools').value), can_edit: textList($('gf-can').value), cannot_edit: textList($('gf-cannot').value) };
+          const lists = { allowed_tools: textList($('gf-tools').value), can_edit: textList($('gf-can').value), cannot_edit: textList($('gf-cannot').value),
+            deny_tools: $('gf-deny').value.split('\n').map((x) => x.trim()).filter(Boolean) };
+          const mode = $('gf-mode').value;
           saveGraph('org', [
             $('gf-model').value.trim() ? { path: [...base, 'model'], value: $('gf-model').value.trim() } : { path: [...base, 'model'], delete: true },
             { path: [...base, 'count'], value: count },
@@ -700,6 +725,8 @@ const PANELS = {
             { path: ['roles', sel.role, 'allowed_tools'], value: lists.allowed_tools },
             lists.can_edit.length ? { path: ['roles', sel.role, 'can_edit'], value: lists.can_edit } : { path: ['roles', sel.role, 'can_edit'], delete: true },
             lists.cannot_edit.length ? { path: ['roles', sel.role, 'cannot_edit'], value: lists.cannot_edit } : { path: ['roles', sel.role, 'cannot_edit'], delete: true },
+            lists.deny_tools.length ? { path: ['roles', sel.role, 'deny_tools'], value: lists.deny_tools } : { path: ['roles', sel.role, 'deny_tools'], delete: true },
+            mode !== 'dontAsk' ? { path: ['roles', sel.role, 'permission_mode'], value: mode } : { path: ['roles', sel.role, 'permission_mode'], delete: true },
           ]);
         };
         $('gpdel').onclick = () => {
@@ -712,6 +739,47 @@ const PANELS = {
           if (!confirm(last ? `'${sel.dept}' 부서의 마지막 역할입니다. 부서도 함께 삭제할까요?` : `'${sel.dept}'의 ${sel.role} 자리를 삭제할까요?`)) return;
           saveGraph('org', [{ path: last ? ['divisions', sel.div, 'depts', sel.dept] : base, delete: true }], null);
         };
+      },
+    };
+  },
+  hq() {
+    const hq = org().hq || {};
+    const s = sessionInfo('ceo');
+    const running = s && ['working', 'waiting', 'idle'].includes(s.state);
+    return {
+      html: `${panelHead('🏛 사장', '조직 관리 세션 ceo')}
+        <p class="gdim">${s ? `세션 ${esc(STATE_TEXT[s.state] || s.state || '')}` : '세션 없음'}</p>
+        ${field('모델 (비우면 기본)', 'gf-model', hq.model || '', 'text', ' placeholder="예: opus"')}
+        ${selectField('권한 모드', 'gf-mode', hq.permission_mode || 'dontAsk', PERMISSION_MODES)}
+        ${field('거부할 도구 (쉼표로)', 'gf-deny', hq.deny_tools || '')}
+        <div class="gpactions"><button id="gpsave" class="primary">저장</button></div>
+        <h4>세션</h4>
+        <div class="gpactions">${s ? '<button id="gpopen">세션 열기</button>' : ''}<button id="gphq">${s ? '설정 다시 적용' : '사장 세션 만들기'}</button>
+          ${running ? '<button id="gprestartc">Claude 다시 시작</button>' : ''}</div>
+        <p class="gdim">권한·모델을 바꾼 뒤에는 '설정 다시 적용' → 'Claude 다시 시작'을 눌러야 반영됩니다.</p>`,
+      bind() {
+        $('gpsave').onclick = () => {
+          const value = {};
+          if ($('gf-model').value.trim()) value.model = $('gf-model').value.trim();
+          if ($('gf-mode').value !== 'dontAsk') value.permission_mode = $('gf-mode').value;
+          if ($('gf-deny').value.trim()) value.deny_tools = $('gf-deny').value.trim();
+          saveGraph('org', [Object.keys(value).length ? { path: ['hq'], value } : { path: ['hq'], delete: true }]);
+        };
+        if ($('gpopen')) $('gpopen').onclick = () => { closeGraph(); openSession('ceo'); };
+        $('gphq').onclick = async () => {
+          try { await api('POST', '/company/ceo'); } catch (e) { return toast(e.message, 4000); }
+          toast(s ? '사장 세션 설정을 다시 적용했습니다' : '사장 세션을 만들었습니다');
+          await refresh();
+          await loadGraph();
+          renderGraphPanel();
+        };
+        if ($('gprestartc')) {
+          $('gprestartc').onclick = async () => {
+            if (!confirm('사장 세션의 Claude를 종료하고 다시 시작할까요? 진행 중인 대화는 끊깁니다.')) return;
+            try { await api('POST', '/company/sessions/ceo/restart_claude'); } catch (e) { return toast(e.message, 4000); }
+            toast('사장 세션 Claude를 다시 시작했습니다');
+          };
+        }
       },
     };
   },
@@ -1060,7 +1128,7 @@ function sessionLifecycleHtml(sel, s) {
   } else {
     const running = ['working', 'waiting', 'idle'].includes(s.state);
     body = `<p class="gdim">설정 적용됨 · ${running ? 'Claude 실행 중' : 'Claude 꺼짐'} · <code>${esc(meta.worktree || '')}</code></p>
-      <div class="gpactions"><button id="gpconfigure">설정 다시 적용</button>${running ? '' : '<button id="gpstartc" class="primary">Claude 시작</button>'}</div>`;
+      <div class="gpactions"><button id="gpconfigure">설정 다시 적용</button>${running ? '<button id="gprestartc">Claude 다시 시작</button>' : '<button id="gpstartc" class="primary">Claude 시작</button>'}</div>`;
   }
   return `<h4>세션</h4>${body}`;
 }
@@ -1086,6 +1154,12 @@ function bindSessionLifecycle(sel, s) {
   }
   if ($('gpconfigure')) $('gpconfigure').onclick = () => run($('gpconfigure'), 'POST', `/company/sessions/${enc(name)}/configure`, undefined, 'CLAUDE.md와 권한을 적용했습니다');
   if ($('gpstartc')) $('gpstartc').onclick = () => run($('gpstartc'), 'POST', `/company/sessions/${enc(name)}/start`, undefined, 'Claude를 시작했습니다');
+  if ($('gprestartc')) {
+    $('gprestartc').onclick = () => {
+      if (!confirm(`'${name}'의 Claude를 종료하고 다시 시작할까요? 진행 중인 대화는 끊깁니다.`)) return;
+      run($('gprestartc'), 'POST', `/company/sessions/${enc(name)}/restart_claude`, undefined, 'Claude를 다시 시작했습니다');
+    };
+  }
 }
 
 function tryOps(fn) {

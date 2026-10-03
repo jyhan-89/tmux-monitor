@@ -8,6 +8,7 @@ import yaml
 VERSION = 1
 IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 APPROVAL_OPTIONS = {"redesign", "drop", "override"}
+PERMISSION_MODES = ("dontAsk", "default", "acceptEdits", "plan", "bypassPermissions")
 SPECIAL_SENDERS = {"orchestrator", "any"}
 WARN_RULES = {"unreachable"}
 
@@ -78,6 +79,8 @@ class Role:
     allowed_tools: list[str] = field(default_factory=list)
     can_edit: list[str] = field(default_factory=list)
     cannot_edit: list[str] = field(default_factory=list)
+    deny_tools: list[str] = field(default_factory=list)
+    permission_mode: str = "dontAsk"
 
 
 @dataclass
@@ -87,6 +90,7 @@ class Org:
     divisions: dict[str, Division]
     profiles: dict[str, Profile]
     roles: dict[str, Role]
+    hq: dict[str, str] = field(default_factory=dict)
 
     def shared_roles(self) -> set[str]:
         return {m.role for m in self.shared.values()}
@@ -241,10 +245,14 @@ def parse_org(text: str) -> Org:
         w = f"org.roles.{key}"
         r.ident(key, w)
         m = r.mapping(raw, w)
+        mode = str(m.get("permission_mode") or "dontAsk")
+        if mode not in PERMISSION_MODES:
+            r.add("permission_mode", f"{w}.permission_mode", f"permission_mode는 {', '.join(PERMISSION_MODES)} 중 하나입니다")
         roles[key] = Role(id=key, prompt=str(m.get("prompt") or ""),
                           allowed_tools=r.str_list(m.get("allowed_tools"), f"{w}.allowed_tools"),
                           can_edit=r.str_list(m.get("can_edit"), f"{w}.can_edit"),
-                          cannot_edit=r.str_list(m.get("cannot_edit"), f"{w}.cannot_edit"))
+                          cannot_edit=r.str_list(m.get("cannot_edit"), f"{w}.cannot_edit"),
+                          deny_tools=r.str_list(m.get("deny_tools"), f"{w}.deny_tools"), permission_mode=mode)
     divisions = {}
     for key, raw in r.mapping(data.get("divisions"), "org.divisions").items():
         w = f"org.divisions.{key}"
@@ -264,7 +272,10 @@ def parse_org(text: str) -> Org:
         divisions[key] = Division(id=key, name=str(d.get("name") or key), profile=str(d.get("profile") or ""),
                                   repo=str(d.get("repo") or ""), template=str(d.get("template") or ""),
                                   folder=str(d.get("folder") or ""), depts=depts)
-    org = Org(version=VERSION, shared=shared, divisions=divisions, profiles=profiles, roles=roles)
+    hq = {k: str(v) for k, v in r.mapping(data.get("hq"), "org.hq").items() if v is not None}
+    if hq.get("permission_mode", "dontAsk") not in PERMISSION_MODES:
+        r.add("permission_mode", "org.hq.permission_mode", f"permission_mode는 {', '.join(PERMISSION_MODES)} 중 하나입니다")
+    org = Org(version=VERSION, shared=shared, divisions=divisions, profiles=profiles, roles=roles, hq=hq)
     _check_org(org, r)
     return _finish(r, org)
 
@@ -283,7 +294,7 @@ def _check_org(org: Org, r: _Reader) -> None:
         if m.role and m.role not in org.roles:
             r.add("role_ref", f"org.shared.{key}.role", f"role '{m.role}'이(가) roles에 없습니다")
     for key, role in org.roles.items():
-        if not role.allowed_tools:
+        if not role.allowed_tools and role.permission_mode != "bypassPermissions":
             r.add("allowed_tools", f"org.roles.{key}.allowed_tools", "allowed_tools가 비어 있습니다")
 
 

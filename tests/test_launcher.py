@@ -101,3 +101,47 @@ def test_configure_rejects_assigned_or_unknown(env):
     sessions_meta.update("autosar", division="mw", dept="impl", role="impl", worktree="/x", assigned=True)
     with pytest.raises(launcher.LaunchError):
         launcher.configure("autosar")
+
+
+def set_org(fn):
+    org = yaml.safe_load((tokens.company_dir() / "org.yaml").read_text())
+    fn(org)
+    (tokens.company_dir() / "org.yaml").write_text(yaml.safe_dump(org, allow_unicode=True))
+
+
+def test_permission_mode_and_deny_tools(env, monkeypatch):
+    tmp, sent = env
+    monkeypatch.delenv("TMUX_WEB_CLAUDE_CMD", raising=False)
+    set_org(lambda o: o["roles"]["impl"].update(permission_mode="acceptEdits", deny_tools=["Bash(rm:*)"]))
+    launcher.create("mw", "impl", "impl", "skeleton")
+    out = launcher.configure("mw-impl-impl-skeleton")
+    assert out["permissions"]["defaultMode"] == "acceptEdits" and "Bash(rm:*)" in out["permissions"]["deny"]
+    set_org(lambda o: o["roles"]["impl"].update(permission_mode="bypassPermissions", allowed_tools=["Bash"]))
+    launcher.configure("mw-impl-impl-skeleton")
+    launcher.start("mw-impl-impl-skeleton")
+    keys = [a for a in sent if a[0] == "send-keys"][-1]
+    assert keys[-2].endswith("claude --model sonnet --dangerously-skip-permissions")
+
+
+def test_invalid_permission_mode_rejected(env):
+    import models
+    org = yaml.safe_load((tokens.company_dir() / "org.yaml").read_text())
+    org["roles"]["impl"]["permission_mode"] = "yolo"
+    with pytest.raises(models.DefinitionError) as e:
+        models.parse_org(yaml.safe_dump(org))
+    assert "permission_mode" in {i.rule for i in e.value.issues}
+    org["roles"]["impl"]["permission_mode"] = "dontAsk"
+    org["hq"] = {"permission_mode": "nope"}
+    with pytest.raises(models.DefinitionError):
+        models.parse_org(yaml.safe_dump(org))
+
+
+def test_ceo_uses_hq_settings(env, monkeypatch):
+    tmp, sent = env
+    monkeypatch.delenv("TMUX_WEB_CLAUDE_CMD", raising=False)
+    set_org(lambda o: o.update(hq={"model": "opus", "permission_mode": "bypassPermissions", "deny_tools": "Bash(rm:*), WebFetch"}))
+    out = launcher.ensure_ceo()
+    assert out["permissions"]["defaultMode"] == "bypassPermissions"
+    assert "Bash(rm:*)" in out["permissions"]["deny"] and "WebFetch" in out["permissions"]["deny"]
+    keys = [a for a in sent if a[0] == "send-keys"][-1]
+    assert keys[-2].endswith("claude --model opus --dangerously-skip-permissions")

@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import history
+import launcher
 import store
 import tmuxctl
 
@@ -24,3 +25,4 @@ def isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(tmuxctl, "tmux", _no_real_tmux)
     monkeypatch.setattr(tmuxctl, "session_exists", lambda name: False)
     monkeypatch.setattr(tmuxctl, "list_sessions", lambda: [])
+    monkeypatch.setattr(launcher, "spawn", lambda fn, *args: None)

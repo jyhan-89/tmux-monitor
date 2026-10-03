@@ -267,6 +267,11 @@ def configure_session(name: str, _: dict = Depends(tokens.require("sessions.laun
     return launcher_call(launcher.configure, name)
 
 
+@router.post("/sessions/{name}/restart_claude")
+def restart_claude(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
+    return launcher_call(launcher.restart_claude, name)
+
+
 @router.post("/sessions/{name}/start")
 def start_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
     return launcher_call(launcher.start, name)

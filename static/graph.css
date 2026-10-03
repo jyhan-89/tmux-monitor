@@ -126,3 +126,4 @@
 #gcanvas .pnode.orphan rect { stroke-dasharray:4 3; }
 #gpanel code { font:11px ui-monospace, monospace; color:var(--fg); word-break:break-all; }
 #gpanel button:disabled { opacity:.5; }
+#gcanvas .gbox.hq { fill:rgba(199,146,234,.08); stroke:rgba(199,146,234,.5); }

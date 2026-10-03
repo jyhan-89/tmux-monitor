@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,10 @@ import tokens
 ROOT = Path(__file__).resolve().parent
 BIN = ROOT / "bin"
 WIDE_TOOLS = {"Bash", "*", "Edit", "Write"}
+
+
+def spawn(fn, *args) -> None:
+    threading.Thread(target=fn, args=args, daemon=True).start()
 
 
 class LaunchError(Exception):
@@ -82,7 +87,7 @@ def edit_rules(globs: list[str]) -> list[str]:
 
 def permissions(company: models.Company, role: models.Role) -> dict:
     wide = [t for t in role.allowed_tools if t in WIDE_TOOLS - {"Edit", "Write"}]
-    if wide:
+    if wide and role.permission_mode != "bypassPermissions":
         raise LaunchError(f"역할 '{role.id}'의 allowed_tools가 너무 넓습니다: {wide}")
     tools = [t for t in role.allowed_tools if t not in ("Edit", "Write")]
     if "Bash(directive:*)" in tools:
@@ -92,7 +97,8 @@ def permissions(company: models.Company, role: models.Role) -> dict:
     deny = edit_rules(role.cannot_edit) + edit_rules([p for p in others if p not in can_edit])
     for private in (history.DATA_DIR / "directives", history.DATA_DIR / "history", tokens.secrets_dir()):
         deny.append(f"Read(/{private.resolve().as_posix()}/**)")
-    return {"defaultMode": "dontAsk", "allow": tools + edit_rules(can_edit), "deny": list(dict.fromkeys(deny))}
+    deny += role.deny_tools
+    return {"defaultMode": role.permission_mode, "allow": tools + edit_rules(can_edit), "deny": list(dict.fromkeys(deny))}
 
 
 def claude_md(company: models.Company, p: Placement) -> str:
@@ -267,15 +273,26 @@ def configure(name: str) -> dict:
     return {"name": name, **meta, "permissions": perms}
 
 
+def claude_cmd(model: str | None, mode: str) -> str:
+    cmd = claude_command()
+    if cmd != "claude":
+        return cmd
+    if model:
+        cmd += f" --model {shlex.quote(model)}"
+    if mode == "bypassPermissions":
+        cmd += " --dangerously-skip-permissions"
+    return cmd
+
+
 def start(name: str) -> dict:
     meta = sessions_meta.get(name)
     if not meta or not meta.get("configured"):
         raise LaunchError("먼저 설정을 적용하세요 (CLAUDE.md·권한)")
+    if meta.get("builtin"):
+        return start_ceo()
     company = load_company()
     p = place(company, meta["division"], meta["dept"], meta["role"])
-    cmd = claude_command()
-    if p.member.model and cmd == "claude":
-        cmd += f" --model {shlex.quote(p.member.model)}"
+    cmd = claude_cmd(p.member.model, p.role.permission_mode)
     env_file = Path(meta["worktree"]) / ".claude" / "tmux-web.env"
     line = f". {shlex.quote(str(env_file))} && {cmd}" if env_file.exists() else cmd
     tmuxctl.tmux("send-keys", "-t", f"={name}:", line, "Enter")
@@ -300,6 +317,7 @@ def launch(division: str, dept: str, role: str, suffix: str | None = None, featu
 
 
 TRUST_PROMPT = re.compile(r"trust this folder|Do you trust the files")
+BYPASS_PROMPT = re.compile(r"Bypass Permissions mode", re.I)
 READY = re.compile(r"\? for shortcuts|shift\+tab to cycle|don't ask on|bypass permissions on|accept edits on")
 
 
@@ -312,7 +330,12 @@ def ensure_ready(name: str, timeout: float = 40.0) -> bool:
     trusted = False
     while time.time() < deadline:
         text = screen(name)
-        if TRUST_PROMPT.search(text):
+        if BYPASS_PROMPT.search(text) and re.search(r"Yes, I accept", text):
+            tmuxctl.tmux("send-keys", "-t", f"={name}:", "Down")
+            time.sleep(0.3)
+            tmuxctl.tmux("send-keys", "-t", f"={name}:", "Enter")
+            history.record({"type": "status_change", "session": name, "to": "bypass_accepted", "source": "launcher"})
+        elif TRUST_PROMPT.search(text):
             if not trusted:
                 tmuxctl.tmux("send-keys", "-t", f"={name}:", "Down")
                 time.sleep(0.3)
@@ -390,6 +413,13 @@ def ceo_md() -> str:
     return "\n\n".join(parts) + "\n"
 
 
+def ceo_settings() -> dict:
+    try:
+        return load_company().org.hq
+    except (LaunchError, models.DefinitionError):
+        return {}
+
+
 def ensure_ceo(start_claude: bool = True) -> dict:
     path = ceo_folder()
     path.mkdir(parents=True, exist_ok=True)
@@ -398,12 +428,14 @@ def ensure_ceo(start_claude: bool = True) -> dict:
         r = tmuxctl.tmux("new-session", "-d", "-s", CEO, "-c", str(path))
         if r.returncode != 0:
             raise LaunchError(f"tmux 세션 생성 실패: {r.stderr.strip()}")
+    hq = ceo_settings()
     token = tokens.write_session_token(CEO, "ceo")
     env = {"TMUX_WEB_SESSION": CEO, "TMUX_WEB_TOKEN": token, "TMUX_WEB_URL": server_url(),
            "PATH": f"{BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
     deny = [f"Read(/{p.resolve().as_posix()}/**)" for p in (tokens.secrets_dir(), history.DATA_DIR / "directives")]
     deny += [f"Edit(/{tokens.company_dir().resolve().as_posix()}/**)"]
-    perms = {"defaultMode": "dontAsk",
+    deny += [t.strip() for t in hq.get("deny_tools", "").split(",") if t.strip()]
+    perms = {"defaultMode": hq.get("permission_mode", "dontAsk"),
              "allow": ["Read", "Grep", "Glob", "Edit(/**)", "Bash(orgctl:*)", f"Bash({BIN / 'orgctl'}:*)",
                        "Bash(directive:*)", f"Bash({BIN / 'directive'}:*)"],
              "deny": deny}
@@ -419,10 +451,45 @@ def ensure_ceo(start_claude: bool = True) -> dict:
                     "claude_md_sha256": hashlib.sha256(md.encode()).hexdigest()[:16]})
     started = False
     if start_claude and not exists:
-        cmd = claude_command()
-        tmuxctl.tmux("send-keys", "-t", f"={CEO}:", f". {shlex.quote(str(env_file))} && {cmd}", "Enter")
+        start_ceo()
         started = True
-    return {"name": CEO, "created": not exists, "started": started, **meta}
+    return {"name": CEO, "created": not exists, "started": started, **meta, "permissions": perms}
+
+
+def start_ceo() -> dict:
+    hq = ceo_settings()
+    env_file = ceo_folder() / ".claude" / "tmux-web.env"
+    cmd = claude_cmd(hq.get("model"), hq.get("permission_mode", "dontAsk"))
+    tmuxctl.tmux("send-keys", "-t", f"={CEO}:", f". {shlex.quote(str(env_file))} && {cmd}", "Enter")
+    if cmd.split()[0] == "claude":
+        spawn(ensure_ready, CEO)
+    return {"name": CEO, **(sessions_meta.get(CEO) or {})}
+
+
+def stop_claude(name: str, timeout: float = 15.0) -> bool:
+    if push.status.get(name, {}).get("state") not in ("idle", "working", "waiting") and \
+            not READY.search(screen(name)):
+        return True
+    tmuxctl.tmux("send-keys", "-t", f"={name}:", "Escape")
+    time.sleep(0.3)
+    tmuxctl.tmux("send-keys", "-t", f"={name}:", "-l", "/exit")
+    tmuxctl.tmux("send-keys", "-t", f"={name}:", "Enter")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(0.5)
+        if not READY.search(screen(name)):
+            return True
+    return False
+
+
+def restart_claude(name: str) -> dict:
+    meta = sessions_meta.get(name)
+    if not meta or not meta.get("configured"):
+        raise LaunchError("설정이 적용된 세션이 아닙니다")
+    if not stop_claude(name):
+        raise LaunchError("Claude가 종료되지 않았습니다. 세션에서 직접 종료한 뒤 다시 시작하세요")
+    history.record({"type": "status_change", "session": name, "to": "restarting", "source": "launcher"})
+    return start(name)
 
 
 def wake_ceo(text: str) -> bool:
