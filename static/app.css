@@ -356,3 +356,6 @@ a.btn:hover { border-color:var(--accent); }
   #files { width:100%; border-left:0; }
   #feditor { font-size:16px; }
 }
+#sessions li.group.orgsec.org { --gc:#c792ea; font-size:13px; }
+#sessions li.group.orgsec.dept { --gc:#a98bd6; }
+#sessions li.group.orgsec.rest { --gc:#8b8f97; }

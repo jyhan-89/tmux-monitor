@@ -160,6 +160,7 @@ Example: `company/examples/mw-minimal/`. Definitions are validated on save; a ru
 | Start a feature | 📝 inbox → new feature (division, feature name, request) |
 | Approve | 📝 inbox: approve / reject / request changes (reject and changes need a reason). New approvals send a push notification |
 | View and edit the organization and process | 🏢 org chart: role node color is the session state, click a node to edit it, double-click a division for its process |
+| Create a role session | 🏢 org chart → role node → create session (an empty session in a `session-name` folder under the division/department folder) → apply settings (CLAUDE.md, permissions, hooks) → start Claude. Set division and department folders in their panels. Organization sessions are listed under 🏢 organization › department in the session list, not as groups |
 | Assign an existing session | 🏢 org chart: drag a session from 'sessions outside the organization' onto a role node (phone: tap the session, then the node). The slot then uses that session instead of creating one, never restarts it, and wakes it only while Claude is running |
 | Force a node | 📝 inbox → features in progress → move node |
 | Stop everything | ⏹ emergency stop above the session list (Esc to every Claude session, automation paused). Resume from the banner |

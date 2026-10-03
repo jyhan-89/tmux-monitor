@@ -124,3 +124,5 @@
 @media (pointer:coarse) { #gcanvas .gport { opacity:1; r:9; } }
 #gcanvas .pnode.orphan { opacity:.5; }
 #gcanvas .pnode.orphan rect { stroke-dasharray:4 3; }
+#gpanel code { font:11px ui-monospace, monospace; color:var(--fg); word-break:break-all; }
+#gpanel button:disabled { opacity:.5; }

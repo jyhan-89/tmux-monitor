@@ -126,9 +126,13 @@ function renderList() {
   if (drag) return;
   const ul = $('sessions');
   ul.innerHTML = '';
-  const sorted = sortSessions(sessions);
+  const all = sortSessions(sessions);
+  const orgs = all.filter((s) => s.meta?.role);
+  const sorted = all.filter((s) => !s.meta?.role);
+  if (orgs.length) renderOrgSections(ul, orgs);
   if (!groups.length) {
-    for (const s of sorted) ul.appendChild(sessionItem(s, false));
+    if (orgs.length && sorted.length) ul.appendChild(orgHeader('rest', '세션', sorted, 0, 'rest'));
+    if (!orgs.length || !collapsedGroups.has('org:rest')) for (const s of sorted) ul.appendChild(sessionItem(s, !!orgs.length, orgs.length ? 1 : 0));
     return;
   }
   assignGroupColors();
@@ -146,6 +150,66 @@ function renderList() {
   if (loose.length) {
     ul.appendChild(groupHeader(null, loose, 0));
     if (!collapsedGroups.has('')) for (const s of loose) ul.appendChild(sessionItem(s, true, 1));
+  }
+}
+
+let divisionNames = {};
+
+function orgHeader(key, label, members, depth, kind) {
+  const li = document.createElement('li');
+  li.className = `group orgsec ${kind}`;
+  li.style.marginLeft = `${depth * 12}px`;
+  li.classList.toggle('sub', depth > 0);
+  const ck = `org:${key}`;
+  const folded = collapsedGroups.has(ck);
+  li.innerHTML = '<span class="gname"></span><span class="gdots"></span><span class="gcount"></span>';
+  li.querySelector('.gname').textContent = `${folded ? '▸' : '▾'} ${label}`;
+  li.querySelector('.gcount').textContent = members.length;
+  const dots = li.querySelector('.gdots');
+  for (const s of members) {
+    if (s.state === 'working' || s.state === 'waiting') {
+      const d = document.createElement('span');
+      d.className = `dot st-${s.state}`;
+      d.title = `${s.name}: ${STATE_LABEL[s.state]}`;
+      dots.appendChild(d);
+    }
+  }
+  li.onclick = () => {
+    if (collapsedGroups.has(ck)) collapsedGroups.delete(ck); else collapsedGroups.add(ck);
+    LS.set('collapsedGroups', [...collapsedGroups]);
+    renderList();
+  };
+  if (kind === 'org') {
+    li.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCtx(e.clientX, e.clientY, [
+        { label: '조직도에서 보기', run: () => { if (typeof openGraph === 'function') openGraph(); } },
+        { label: folded ? '펼치기' : '접기', run: () => li.click() },
+      ]);
+    });
+  }
+  return li;
+}
+
+function renderOrgSections(ul, orgs) {
+  const divs = [...new Set(orgs.map((s) => s.meta.division))].sort((a, b) => (a === '*') - (b === '*') || a.localeCompare(b));
+  for (const div of divs) {
+    const inDiv = orgs.filter((s) => s.meta.division === div);
+    const label = div === '*' ? '🏢 전사 공통' : `🏢 ${div}${divisionNames[div] ? ` · ${divisionNames[div]}` : ''}`;
+    ul.appendChild(orgHeader(div, label, inDiv, 0, 'org'));
+    if (collapsedGroups.has(`org:${div}`)) continue;
+    const depts = [...new Set(inDiv.map((s) => s.meta.dept))].sort();
+    for (const dept of depts) {
+      const members = inDiv.filter((s) => s.meta.dept === dept);
+      if (div === '*' || depts.length === 1 && dept === 'shared') {
+        for (const s of members) ul.appendChild(sessionItem(s, true, 1));
+        continue;
+      }
+      ul.appendChild(orgHeader(`${div}/${dept}`, dept === 'shared' ? '공통' : dept, members, 1, 'dept'));
+      if (collapsedGroups.has(`org:${div}/${dept}`)) continue;
+      for (const s of members) ul.appendChild(sessionItem(s, true, 2));
+    }
   }
 }
 
@@ -268,10 +332,10 @@ function sessionItem(s, inGroup, depth = 0) {
   } else {
     badge.remove();
   }
-  if (s.meta?.role) {
+  if (s.meta?.role && s.meta.node) {
     const rb = document.createElement('span');
     rb.className = 'rolebadge';
-    rb.textContent = s.meta.node ? `${s.meta.role} · ${s.meta.node}` : s.meta.role;
+    rb.textContent = `▶ ${s.meta.node}`;
     rb.title = `${s.meta.division}.${s.meta.dept}.${s.meta.role}${s.meta.node ? ` · 노드 ${s.meta.node}` : ''}${s.state_source ? ` · 상태 출처 ${s.state_source}` : ''}`;
     li.querySelector('.name').after(rb);
   }
@@ -564,6 +628,14 @@ async function loadInboxBadge() {
     $('inboxbtn').hidden = !companyReady;
     if (!companyReady) return;
   }
+  try {
+    const divs = await api('GET', '/company/divisions');
+    const names = Object.fromEntries(divs.map((d) => [d.id, d.name]));
+    if (JSON.stringify(names) !== JSON.stringify(divisionNames)) {
+      divisionNames = names;
+      renderList();
+    }
+  } catch {}
   try {
     const pending = await api('GET', '/approvals?status=pending');
     $('inboxbadge').hidden = !pending.length;

@@ -643,7 +643,8 @@ const PANELS = {
       html: `${panelHead(sel.role, sel.name)}
         <p class="gdim">${s ? `세션 ${esc(STATE_TEXT[s.state] || s.state || '')}${s.meta?.node ? ` · 노드 ${esc(s.meta.node)}` : ''}` : '세션 없음'}</p>
         ${s ? '<button id="gpopen" class="primary">세션 열기</button>' : ''}
-        <h4>세션 배정</h4>
+        ${sel.assigned ? '' : sessionLifecycleHtml(sel, s)}
+        <h4>기존 세션 배정</h4>
         ${sel.assigned ? `<p class="gdim">배정됨: <b>${esc(sel.name)}</b> · 오케스트레이터가 이 자리의 일을 이 세션에 맡깁니다</p>
           <div class="gpactions"><button id="gpunassign">배정 해제</button></div>`
     : `${selectField('기존 세션', 'gf-assign', '', [['', '(선택)'], ...freeSessions().map((n) => [n, n])])}
@@ -659,6 +660,7 @@ const PANELS = {
         <div class="gpactions"><button id="gpsave" class="primary">저장</button><button id="gpdel" class="danger">이 자리 삭제</button></div>`,
       bind() {
         if (s) $('gpopen').onclick = () => { closeGraph(); openSession(s.name); };
+        if (!sel.assigned) bindSessionLifecycle(sel, s);
         if (sel.assigned) {
           $('gpunassign').onclick = async () => {
             if (!confirm(`'${sel.name}' 배정을 해제할까요? 세션은 그대로 남습니다.`)) return;
@@ -726,8 +728,10 @@ const PANELS = {
       html: `${panelHead('새 본부', '')}${field('본부 ID (예: bsp)', 'gf-id', '')}${field('이름', 'gf-name', '')}
         ${selectField('프로파일', 'gf-profile', profiles[0] || '__new__', [...profiles, ['__new__', '＋ 새 프로파일…']])}
         <label id="gf-profile-newbox" class="newrole" hidden>새 프로파일 이름<input id="gf-profile-new" type="text"></label>
-        ${field('git 저장소 (bare 저장소 경로나 서버 주소)', 'gf-repo', '')}
+        ${field('폴더 (이 본부 세션들이 만들어질 위치)', 'gf-folder', '', 'text', ' placeholder="예: ~/work/mw"')}
+        ${field('git 저장소 (선택: bare 저장소 경로나 서버 주소)', 'gf-repo', '')}
         ${selectField('프로세스 템플릿', 'gf-tpl', Object.keys(templates())[0] || '', ['', ...Object.keys(templates())].map((k) => [k, k || '(없음)']))}
+        <p class="gdim">세션은 <code>폴더/부서/세션이름</code>에 만들어집니다. 저장소를 정하면 그 위치에 작업 브랜치(worktree)로 만들어집니다.</p>
         <div class="gpactions"><button id="gpsave" class="primary">추가</button></div>`,
       bind() {
         const sync = () => { $('gf-profile-newbox').hidden = $('gf-profile').value !== '__new__'; };
@@ -742,6 +746,7 @@ const PANELS = {
             ops.push({ path: ['profiles', profile], value: { standards: [], gates_dir: `gates/${profile}` } });
           }
           const div = { name: $('gf-name').value.trim() || id, profile, depts: {} };
+          if ($('gf-folder').value.trim()) div.folder = $('gf-folder').value.trim();
           if ($('gf-repo').value.trim()) div.repo = $('gf-repo').value.trim();
           if ($('gf-tpl').value) div.template = $('gf-tpl').value;
           ops.push({ path: ['divisions', id], value: div });
@@ -756,10 +761,12 @@ const PANELS = {
     return {
       html: `${panelHead(`본부 ${sel.div}`, d.name)}${field('이름', 'gf-name', d.name || '')}
         ${selectField('프로파일', 'gf-profile', d.profile, profiles)}
+        ${field('폴더', 'gf-folder', d.folder || '', 'text', ' placeholder="비우면 기본 위치(~/.local/share/tmux-web/worktrees)"')}
         ${field('git 저장소', 'gf-repo', d.repo || '')}
         ${selectField('프로세스 템플릿', 'gf-tpl', d.template || '', ['', ...Object.keys(templates())].map((k) => [k, k || '(자동)']))}
         <div class="gpactions"><button id="gpsave" class="primary">저장</button><button id="gpproc">프로세스 보기</button></div>
-        <h4>부서 추가</h4>${field('부서 ID (예: impl)', 'gf-dept', '')}${roleFieldHtml('gf-role', null)}
+        <h4>부서 추가</h4>${field('부서 ID (예: impl)', 'gf-dept', '')}
+        ${field('부서 폴더 (선택, 비우면 본부폴더/부서ID)', 'gf-dfolder', '')}${roleFieldHtml('gf-role', null)}
         ${field('인원', 'gf-count', 1, 'number', ' min="1"')}${field('계층 (쉼표로, 병렬 구현용)', 'gf-layers', '')}
         <div class="gpactions"><button id="gpadd">부서 추가</button></div>
         <div class="gpactions"><button id="gpdel" class="danger">본부 삭제</button></div>`,
@@ -768,6 +775,7 @@ const PANELS = {
         $('gpsave').onclick = () => saveGraph('org', [
           { path: ['divisions', sel.div, 'name'], value: $('gf-name').value.trim() || sel.div },
           { path: ['divisions', sel.div, 'profile'], value: $('gf-profile').value },
+          $('gf-folder').value.trim() ? { path: ['divisions', sel.div, 'folder'], value: $('gf-folder').value.trim() } : { path: ['divisions', sel.div, 'folder'], delete: true },
           $('gf-repo').value.trim() ? { path: ['divisions', sel.div, 'repo'], value: $('gf-repo').value.trim() } : { path: ['divisions', sel.div, 'repo'], delete: true },
           $('gf-tpl').value ? { path: ['divisions', sel.div, 'template'], value: $('gf-tpl').value } : { path: ['divisions', sel.div, 'template'], delete: true },
         ]);
@@ -781,6 +789,7 @@ const PANELS = {
           for (const l of layers) if (!IDENT.test(l)) throw new Error(`계층 이름이 올바르지 않습니다: ${l}`);
           const value = { members: { role, count: Math.max(1, parseInt($('gf-count').value, 10) || 1) } };
           if (layers.length) value.layers = layers;
+          if ($('gf-dfolder').value.trim()) value.folder = $('gf-dfolder').value.trim();
           ops.push({ path: ['divisions', sel.div, 'depts', dept], value });
           return saveGraph('org', ops, { kind: 'dept', div: sel.div, dept });
         });
@@ -799,6 +808,7 @@ const PANELS = {
       html: `${panelHead(`부서 ${sel.dept}`, `본부 ${sel.div}`)}
         <ul class="glist">${slots.map((k) => `<li>${k === 'lead' ? '책임자' : '구성원'}: ${esc(d[k].role)} ×${d[k].count || 1}${d[k].model ? ` · ${esc(d[k].model)}` : ''}</li>`).join('')}</ul>
         ${field('계층 (쉼표로)', 'gf-layers', (d.layers || []).join(', '))}${field('부서 규칙 파일', 'gf-rules', d.rules || '')}
+        ${field('부서 폴더 (비우면 본부폴더/부서ID)', 'gf-dfolder', d.folder || '')}
         <div class="gpactions"><button id="gpsave" class="primary">저장</button></div>
         ${free.length ? `<h4>역할 추가</h4>${selectField('자리', 'gf-slot', free[0], free.map((k) => [k, k === 'lead' ? '책임자 (lead)' : '구성원 (members)']))}
         ${roleFieldHtml('gf-role', null)}${field('모델', 'gf-model', '')}${field('인원', 'gf-count', 1, 'number', ' min="1"')}
@@ -813,6 +823,7 @@ const PANELS = {
           return saveGraph('org', [
             layers.length ? { path: [...base, 'layers'], value: layers } : { path: [...base, 'layers'], delete: true },
             $('gf-rules').value.trim() ? { path: [...base, 'rules'], value: $('gf-rules').value.trim() } : { path: [...base, 'rules'], delete: true },
+            $('gf-dfolder').value.trim() ? { path: [...base, 'folder'], value: $('gf-dfolder').value.trim() } : { path: [...base, 'folder'], delete: true },
           ]);
         });
         if (free.length) {
@@ -1015,6 +1026,54 @@ const PANELS = {
     };
   },
 };
+
+function slotFolder(sel) {
+  const div = org().divisions?.[sel.div] || {};
+  const dept = div.depts?.[sel.dept] || {};
+  const base = div.folder || `~/.local/share/tmux-web/worktrees/${sel.div}`;
+  if (dept.folder) return `${dept.folder.startsWith('/') || dept.folder.startsWith('~') ? dept.folder : `${base}/${dept.folder}`}/${sel.name}`;
+  return div.folder ? `${base}/${sel.dept}/${sel.name}` : `${base}/${sel.name}`;
+}
+
+function sessionLifecycleHtml(sel, s) {
+  const meta = s?.meta || {};
+  let body;
+  if (!s) {
+    body = `<p class="gdim">세션 없음 · 만들 위치: <code>${esc(slotFolder(sel))}</code></p>
+      <div class="gpactions"><button id="gpcreate" class="primary">세션 만들기</button></div>`;
+  } else if (!meta.configured) {
+    body = `<p class="gdim">빈 세션 · 폴더 <code>${esc(meta.worktree || s.path || '')}</code></p>
+      <div class="gpactions"><button id="gpconfigure" class="primary">설정 적용 (CLAUDE.md·권한)</button></div>`;
+  } else {
+    const running = ['working', 'waiting', 'idle'].includes(s.state);
+    body = `<p class="gdim">설정 적용됨 · ${running ? 'Claude 실행 중' : 'Claude 꺼짐'} · <code>${esc(meta.worktree || '')}</code></p>
+      <div class="gpactions"><button id="gpconfigure">설정 다시 적용</button>${running ? '' : '<button id="gpstartc" class="primary">Claude 시작</button>'}</div>`;
+  }
+  return `<h4>세션</h4>${body}`;
+}
+
+function bindSessionLifecycle(sel, s) {
+  const run = async (btn, method, path, body, msg) => {
+    btn.disabled = true;
+    try {
+      await api(method, path, body);
+    } catch (e) {
+      btn.disabled = false;
+      return toast(e.message, 5000);
+    }
+    toast(msg);
+    await refresh();
+    await loadGraph();
+    renderGraphPanel();
+  };
+  const name = s?.name || sel.name;
+  if ($('gpcreate')) {
+    $('gpcreate').onclick = () => run($('gpcreate'), 'POST', '/company/sessions/create',
+      { division: sel.div, dept: sel.dept, role: sel.role, suffix: sel.suffix || null }, `세션 ${name}을(를) 만들었습니다`);
+  }
+  if ($('gpconfigure')) $('gpconfigure').onclick = () => run($('gpconfigure'), 'POST', `/company/sessions/${enc(name)}/configure`, undefined, 'CLAUDE.md와 권한을 적용했습니다');
+  if ($('gpstartc')) $('gpstartc').onclick = () => run($('gpstartc'), 'POST', `/company/sessions/${enc(name)}/start`, undefined, 'Claude를 시작했습니다');
+}
 
 function tryOps(fn) {
   try {

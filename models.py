@@ -43,6 +43,7 @@ class Dept:
     members: Member | None = None
     layers: list[str] = field(default_factory=list)
     rules: str = ""
+    folder: str = ""
 
     def all_members(self) -> list[Member]:
         return [m for m in (self.lead, self.members) if m]
@@ -55,6 +56,7 @@ class Division:
     profile: str
     repo: str = ""
     template: str = ""
+    folder: str = ""
     depts: dict[str, Dept] = field(default_factory=dict)
 
     def roles(self) -> set[str]:
@@ -254,12 +256,14 @@ def parse_org(text: str) -> Org:
             r.ident(dkey, dw)
             dd = r.mapping(draw, dw)
             dept = Dept(lead=_member(dd.get("lead"), f"{dw}.lead", r), members=_member(dd.get("members"), f"{dw}.members", r),
-                        layers=r.str_list(dd.get("layers"), f"{dw}.layers"), rules=str(dd.get("rules") or ""))
+                        layers=r.str_list(dd.get("layers"), f"{dw}.layers"), rules=str(dd.get("rules") or ""),
+                        folder=str(dd.get("folder") or ""))
             for layer in dept.layers:
                 r.ident(layer, f"{dw}.layers")
             depts[dkey] = dept
         divisions[key] = Division(id=key, name=str(d.get("name") or key), profile=str(d.get("profile") or ""),
-                                  repo=str(d.get("repo") or ""), template=str(d.get("template") or ""), depts=depts)
+                                  repo=str(d.get("repo") or ""), template=str(d.get("template") or ""),
+                                  folder=str(d.get("folder") or ""), depts=depts)
     org = Org(version=VERSION, shared=shared, divisions=divisions, profiles=profiles, roles=roles)
     _check_org(org, r)
     return _finish(r, org)

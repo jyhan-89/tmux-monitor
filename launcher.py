@@ -134,12 +134,24 @@ def repo_dir(div: models.Division) -> Path:
     return clone
 
 
-def worktree(div: models.Division, name: str, branch: str, base: str) -> Path:
-    repo = repo_dir(div)
-    path = history.DATA_DIR / "worktrees" / div.id / name
+def slot_base(div: models.Division, dept: str) -> Path:
+    d = div.depts.get(dept)
+    root = Path(div.folder).expanduser() if div.folder else history.DATA_DIR / "worktrees" / div.id
+    if d and d.folder:
+        p = Path(d.folder).expanduser()
+        return p if p.is_absolute() else root / p
+    return root / dept if div.folder else root
+
+
+def session_folder(div: models.Division, dept: str, name: str, branch: str, base: str) -> Path:
+    path = slot_base(div, dept) / name
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not div.repo:
+        path.mkdir(parents=True)
+        return path
+    repo = repo_dir(div)
     exists = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=repo).returncode == 0
     if exists:
         run_git("worktree", "add", str(path), branch, cwd=repo)
@@ -199,51 +211,92 @@ def unassign(name: str) -> dict | None:
     return meta
 
 
-def launch(division: str, dept: str, role: str, suffix: str | None = None, feature: str = "", base: str = "main") -> dict:
+def create(division: str, dept: str, role: str, suffix: str | None = None, feature: str = "", base: str = "main") -> dict:
     company = load_company()
     p = place(company, division, dept, role)
-    assigned = sessions_meta.assigned_to(division, dept, role, suffix)
-    if assigned and tmuxctl.session_exists(assigned):
-        return {"name": assigned, "created": False, "assigned": True, **(sessions_meta.get(assigned) or {})}
     name = tmuxctl.role_session_name(division, dept, role, suffix)
     if tmuxctl.session_exists(name):
         return {"name": name, "created": False, **(sessions_meta.get(name) or {})}
-    perms = permissions(company, p.role)
     branch = f"feat/{feature or 'work'}/{suffix or role}"
-    path = worktree(p.division, name, branch, base)
-    token = tokens.issue("session", name)
+    path = session_folder(p.division, dept, name, branch, base)
+    r = tmuxctl.tmux("new-session", "-d", "-s", name, "-c", str(path))
+    if r.returncode != 0:
+        raise LaunchError(f"tmux 세션 생성 실패: {r.stderr.strip()}")
+    meta = sessions_meta.update(name, division=division, dept=dept, role=role, suffix=suffix or None,
+                                branch=branch if p.division.repo else None, worktree=str(path), grouped=True)
+    history.record({"type": "session_start", "session": name, "source": "launcher", "folder": str(path)})
+    return {"name": name, "created": True, **meta}
+
+
+def configure(name: str) -> dict:
+    meta = sessions_meta.get(name)
+    if not meta or meta.get("assigned") or not meta.get("worktree"):
+        raise LaunchError(f"조직에서 만든 세션이 아닙니다: {name}")
+    company = load_company()
+    p = place(company, meta["division"], meta["dept"], meta["role"])
+    path = Path(meta["worktree"])
+    if not path.is_dir():
+        raise LaunchError(f"세션 폴더가 없습니다: {path}")
+    perms = permissions(company, p.role)
+    token = tokens.write_session_token(name)
     env = {"TMUX_WEB_SESSION": name, "TMUX_WEB_TOKEN": token, "TMUX_WEB_URL": server_url(),
            "PATH": f"{BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
     write_settings(path, perms, env)
     md = claude_md(company, p)
     (path / "CLAUDE.md").write_text(md)
     (path / "coord" / "inbox").mkdir(parents=True, exist_ok=True)
-    exclude = Path(run_git("rev-parse", "--git-path", "info/exclude", cwd=path))
-    exclude = exclude if exclude.is_absolute() else path / exclude
-    lines = exclude.read_text().splitlines() if exclude.exists() else []
-    for pat in ("coord/inbox/", ".claude/", "CLAUDE.md"):
-        if pat not in lines:
-            lines.append(pat)
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    exclude.write_text("\n".join(lines) + "\n")
-    args = ["new-session", "-d", "-s", name, "-c", str(path)]
+    if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=path, capture_output=True).returncode == 0:
+        exclude = Path(run_git("rev-parse", "--git-path", "info/exclude", cwd=path))
+        exclude = exclude if exclude.is_absolute() else path / exclude
+        lines = exclude.read_text().splitlines() if exclude.exists() else []
+        for pat in ("coord/inbox/", ".claude/", "CLAUDE.md"):
+            if pat not in lines:
+                lines.append(pat)
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text("\n".join(lines) + "\n")
     for k, v in env.items():
-        args += ["-e", f"{k}={v}"]
-    r = tmuxctl.tmux(*args)
-    if r.returncode != 0:
-        tokens.revoke_session(name)
-        raise LaunchError(f"tmux 세션 생성 실패: {r.stderr.strip()}")
+        tmuxctl.tmux("set-environment", "-t", f"={name}", k, v)
+    env_file = path / ".claude" / "tmux-web.env"
+    fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("".join(f"export {k}={shlex.quote(v)}\n" for k, v in env.items()))
+    meta = sessions_meta.update(name, configured=True)
+    history.record({"type": "session_configure", "session": name, "source": "launcher",
+                    "claude_md_sha256": hashlib.sha256(md.encode()).hexdigest()[:16]})
+    directives.deliver_pending(name)
+    return {"name": name, **meta, "permissions": perms}
+
+
+def start(name: str) -> dict:
+    meta = sessions_meta.get(name)
+    if not meta or not meta.get("configured"):
+        raise LaunchError("먼저 설정을 적용하세요 (CLAUDE.md·권한)")
+    company = load_company()
+    p = place(company, meta["division"], meta["dept"], meta["role"])
     cmd = claude_command()
     if p.member.model and cmd == "claude":
         cmd += f" --model {shlex.quote(p.member.model)}"
-    tmuxctl.tmux("send-keys", "-t", f"={name}:", cmd, "Enter")
+    env_file = Path(meta["worktree"]) / ".claude" / "tmux-web.env"
+    line = f". {shlex.quote(str(env_file))} && {cmd}" if env_file.exists() else cmd
+    tmuxctl.tmux("send-keys", "-t", f"={name}:", line, "Enter")
     ready = ensure_ready(name) if cmd.split()[0] == "claude" else True
-    meta = sessions_meta.update(name, division=division, dept=dept, role=role, branch=branch, worktree=str(path))
-    sessions_meta.adopt([name])
-    history.record({"type": "session_start", "session": name, "source": "launcher", "branch": branch,
-                    "claude_md_sha256": hashlib.sha256(md.encode()).hexdigest()[:16]})
-    directives.deliver_pending(name)
-    return {"name": name, "created": True, "ready": ready, **meta, "permissions": perms}
+    history.record({"type": "status_change", "session": name, "to": "started", "source": "launcher", "ready": ready})
+    return {"name": name, "ready": ready, **meta}
+
+
+def launch(division: str, dept: str, role: str, suffix: str | None = None, feature: str = "", base: str = "main") -> dict:
+    company = load_company()
+    place(company, division, dept, role)
+    assigned = sessions_meta.assigned_to(division, dept, role, suffix)
+    if assigned and tmuxctl.session_exists(assigned):
+        return {"name": assigned, "created": False, "assigned": True, **(sessions_meta.get(assigned) or {})}
+    name = tmuxctl.role_session_name(division, dept, role, suffix)
+    if tmuxctl.session_exists(name) and (sessions_meta.get(name) or {}).get("configured"):
+        return {"name": name, "created": False, **(sessions_meta.get(name) or {})}
+    created = create(division, dept, role, suffix, feature, base)
+    configure(name)
+    started = start(name)
+    return {**started, "created": created["created"]}
 
 
 TRUST_PROMPT = re.compile(r"trust this folder|Do you trust the files")

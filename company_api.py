@@ -231,6 +231,35 @@ def unassign_session(name: str, _: dict = Depends(tokens.require("company.write"
     return {"ok": True}
 
 
+class Slot(BaseModel):
+    division: str
+    dept: str
+    role: str
+    suffix: str | None = None
+
+
+def launcher_call(fn, *args):
+    try:
+        return fn(*args)
+    except (launcher.LaunchError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/sessions/create")
+def create_session(body: Slot, _: dict = Depends(tokens.require("sessions.launch"))):
+    return launcher_call(launcher.create, body.division, body.dept, body.role, body.suffix)
+
+
+@router.post("/sessions/{name}/configure")
+def configure_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
+    return launcher_call(launcher.configure, name)
+
+
+@router.post("/sessions/{name}/start")
+def start_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
+    return launcher_call(launcher.start, name)
+
+
 @router.post("/sessions/{name}/restart")
 def restart_session(name: str, _: dict = Depends(tokens.require("sessions.launch"))):
     try:

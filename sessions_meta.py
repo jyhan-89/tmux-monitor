@@ -4,7 +4,7 @@ import store
 from tmuxctl import parse_role_session
 
 FILE = "sessions_meta.json"
-FIELDS = ("division", "dept", "role", "suffix", "branch", "worktree", "node", "grouped", "assigned")
+FIELDS = ("division", "dept", "role", "suffix", "branch", "worktree", "node", "grouped", "assigned", "configured")
 
 
 def all_meta() -> dict[str, dict]:
@@ -41,24 +41,14 @@ def forget(name: str) -> None:
 
 def adopt(names: list[str], known: Callable[[dict], bool] = lambda parsed: False) -> bool:
     data = all_meta()
-    grouped = store.group_of()
     changed = False
     for name in names:
         parsed = parse_role_session(name)
-        if not parsed or data.get(name, {}).get("grouped"):
+        if not parsed or name in data or not known(parsed):
             continue
-        if name not in data and not known(parsed):
-            continue
-        meta = data.setdefault(name, {})
-        for k in ("division", "dept", "role"):
-            meta.setdefault(k, parsed[k])
-        meta["grouped"] = True
+        data[name] = {"division": parsed["division"], "dept": parsed["dept"], "role": parsed["role"],
+                      "suffix": parsed["suffix"]}
         changed = True
-        if name not in grouped:
-            group = f"{parsed['division']}/{parsed['dept']}"
-            if group not in store.groups():
-                store.create_group(group)
-            store.move_session(name, group)
     if changed:
         store.save(FILE, data)
     return changed
