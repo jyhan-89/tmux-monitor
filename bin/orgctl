@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+URL = os.environ.get("TMUX_WEB_URL", "http://127.0.0.1:8765/dev").rstrip("/")
+
+
+def session_name() -> str:
+    name = os.environ.get("TMUX_WEB_SESSION", "")
+    if name or not os.environ.get("TMUX"):
+        return name
+    args = ["tmux", "display-message", "-p"] + (["-t", os.environ["TMUX_PANE"]] if os.environ.get("TMUX_PANE") else []) + ["#S"]
+    r = subprocess.run(args, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def find_token() -> str:
+    if os.environ.get("TMUX_WEB_TOKEN"):
+        return os.environ["TMUX_WEB_TOKEN"]
+    name = session_name()
+    if not name or "/" in name:
+        return ""
+    data = os.environ.get("TMUX_WEB_DATA") or os.path.expanduser("~/.local/share/tmux-web")
+    try:
+        with open(os.path.join(data, "sessions", f"{name}.token")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+TOKEN = find_token()
+
+
+def call(method: str, path: str, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{URL}/api{path}", data=data, method=method,
+                                 headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            detail = json.loads(raw).get("detail")
+        except (json.JSONDecodeError, AttributeError):
+            detail = raw.decode(errors="replace")
+        if isinstance(detail, dict) and detail.get("issues"):
+            print(f"orgctl: {detail.get('message', '검증 실패')}", file=sys.stderr)
+            for i in detail["issues"]:
+                print(f"  - [{i['rule']}] {i['where']}: {i['message']}", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(f"orgctl: {e.code} {detail}")
+    except urllib.error.URLError as e:
+        sys.exit(f"orgctl: 서버에 연결할 수 없습니다 ({URL}): {e.reason}")
+
+
+def print_warnings(res) -> None:
+    for w in (res or {}).get("warnings", []):
+        print(f"  경고 [{w['rule']}] {w['where']}: {w['message']}")
+
+
+def cmd_status(_a) -> None:
+    insts = call("GET", "/company/instances")
+    pending = call("GET", "/approvals?status=pending")
+    sessions = call("GET", "/company/sessions")
+    print("## 진행 중인 기능")
+    for i in insts:
+        counters = ", ".join(f"{k} {v}" for k, v in (i.get("counters") or {}).items())
+        print(f"- {i['division']}/{i['feature']}: {i['status']} · 노드 {i['node']}" + (f" · 반려 {counters}" if counters else "")
+              + (" · 대기열" if i.get("queued") else ""))
+        if i.get("note"):
+            print(f"    {i['note'].splitlines()[0][:160]}")
+    if not insts:
+        print("- 없음")
+    print("## 미결 결재")
+    for a in pending:
+        print(f"- {a['id']} [{a['kind']}] {a['instance']} · {a['node']}: {a['summary'][:120]}")
+    if not pending:
+        print("- 없음")
+    print("## 역할 세션")
+    for s in sessions:
+        m = s["meta"]
+        print(f"- {s['name']}: {m.get('division')}/{m.get('dept')}/{m.get('role')} · {s.get('state') or '-'}"
+              + (f" · 노드 {m['node']}" if m.get("node") else ""))
+    if not sessions:
+        print("- 없음")
+
+
+def cmd_show(a) -> None:
+    print(call("GET", f"/company/{a.kind}")["text"], end="")
+
+
+def read_file(path: str) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def cmd_check(a) -> None:
+    res = call("POST", f"/company/{a.kind}/check", {"text": read_file(a.file)})
+    print("검증 통과")
+    print_warnings(res)
+
+
+def cmd_apply(a) -> None:
+    res = call("PUT", f"/company/{a.kind}", {"text": read_file(a.file)})
+    print(f"{a.kind}.yaml 저장")
+    print_warnings(res)
+
+
+def cmd_start(a) -> None:
+    call("POST", "/company/instances", {"division": a.division, "feature": a.feature, "brief": a.brief})
+    print(f"{a.division}/{a.feature} 시작 요청 (오케스트레이터가 다음 주기에 시작)")
+
+
+def cmd_move(a) -> None:
+    call("POST", f"/company/instances/{a.division}/{a.feature}/transition", {"to": a.node, "reason": a.reason})
+    print(f"{a.division}/{a.feature} → {a.node} 이동 요청")
+
+
+def cmd_session(a) -> None:
+    if a.action == "create":
+        if len(a.args) < 3:
+            sys.exit("사용법: orgctl session create <본부> <부서> <역할> [접미사]")
+        body = {"division": a.args[0], "dept": a.args[1], "role": a.args[2], "suffix": a.args[3] if len(a.args) > 3 else None}
+        res = call("POST", "/company/sessions/create", body)
+    else:
+        if len(a.args) != 1:
+            sys.exit(f"사용법: orgctl session {a.action} <세션 이름>")
+        res = call("POST", f"/company/sessions/{urllib.parse.quote(a.args[0])}/{a.action}")
+    print(f"{res.get('name')}: {a.action} 완료" + (f" · 폴더 {res['worktree']}" if res.get("worktree") else ""))
+
+
+def cmd_approvals(_a) -> None:
+    for x in call("GET", "/approvals?status=pending"):
+        print(f"{x['id']} [{x['kind']}] {x['instance']} · {x['node']}\n  {x['summary']}\n  선택지: {', '.join(x['options'])}")
+
+
+def cmd_history(a) -> None:
+    q = {k: v for k, v in (("session", a.session), ("type", a.type), ("limit", str(a.limit))) if v}
+    for e in call("GET", "/history?" + urllib.parse.urlencode(q)):
+        rest = {k: v for k, v in e.items() if k not in ("ts", "type", "session") and v not in (None, "")}
+        print(f"{e['ts'][5:19]} {e['type']:<16} {e['session']:<24} {json.dumps(rest, ensure_ascii=False)[:160]}")
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="orgctl", description="조직·프로세스 관리")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    s = sub.add_parser("show")
+    s.add_argument("kind", choices=["org", "process", "documents"])
+    s.set_defaults(fn=cmd_show)
+    for name, fn in (("check", cmd_check), ("apply", cmd_apply)):
+        x = sub.add_parser(name)
+        x.add_argument("kind", choices=["org", "process", "documents"])
+        x.add_argument("file")
+        x.set_defaults(fn=fn)
+    x = sub.add_parser("start")
+    x.add_argument("division")
+    x.add_argument("feature")
+    x.add_argument("--brief", default="")
+    x.set_defaults(fn=cmd_start)
+    x = sub.add_parser("move")
+    x.add_argument("division")
+    x.add_argument("feature")
+    x.add_argument("node")
+    x.add_argument("--reason", default="")
+    x.set_defaults(fn=cmd_move)
+    x = sub.add_parser("session")
+    x.add_argument("action", choices=["create", "configure", "start"])
+    x.add_argument("args", nargs="*")
+    x.set_defaults(fn=cmd_session)
+    sub.add_parser("approvals").set_defaults(fn=cmd_approvals)
+    x = sub.add_parser("history")
+    x.add_argument("--session")
+    x.add_argument("--type")
+    x.add_argument("--limit", type=int, default=30)
+    x.set_defaults(fn=cmd_history)
+    a = p.parse_args(argv)
+    if not TOKEN:
+        sys.exit("orgctl: 토큰이 없습니다 (사장 세션 안에서 쓰세요)")
+    a.fn(a)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

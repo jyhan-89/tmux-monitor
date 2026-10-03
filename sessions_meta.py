@@ -4,7 +4,7 @@ import store
 from tmuxctl import parse_role_session
 
 FILE = "sessions_meta.json"
-FIELDS = ("division", "dept", "role", "suffix", "branch", "worktree", "node", "grouped", "assigned", "configured")
+FIELDS = ("division", "dept", "role", "suffix", "branch", "worktree", "node", "grouped", "assigned", "configured", "builtin")
 
 
 def all_meta() -> dict[str, dict]:

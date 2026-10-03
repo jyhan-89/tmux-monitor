@@ -17,6 +17,8 @@ SCOPES: dict[str, set[str]] = {
     "orchestrator": {"company.read", "control", "directives.manage", "sessions.meta", "sessions.launch", "history.read", "approvals.manage"},
     "hook": {"event"},
     "session": {"directives.self"},
+    "ceo": {"company.read", "company.write", "sessions.launch", "sessions.meta", "history.read", "approvals.manage",
+            "directives.manage", "control"},
 }
 
 login_check: Callable[[Request], bool] = lambda request: False
@@ -63,7 +65,7 @@ def issue(role: str, session: str | None = None) -> str:
         raise ValueError("session 토큰에는 세션 이름이 필요합니다")
     token = secrets.token_urlsafe(32)
     data = _load()
-    if role == "session":
+    if session:
         data = {k: v for k, v in data.items() if v.get("session") != session}
     data[_digest(token)] = {"role": role, "session": session, "created": int(time.time())}
     _save(data)
@@ -104,8 +106,8 @@ def history_dir() -> Path:
     return history.DATA_DIR
 
 
-def write_session_token(name: str) -> str:
-    token = issue("session", name)
+def write_session_token(name: str, role: str = "session") -> str:
+    token = issue(role, name)
     f = session_token_file(name)
     f.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(f.parent, 0o700)

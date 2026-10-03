@@ -362,3 +362,64 @@ def restart(name: str) -> dict:
     tokens.revoke_session(name)
     history.record({"type": "session_stop", "session": name, "source": "launcher", "reason": "restart"})
     return launch(parsed["division"], parsed["dept"], parsed["role"], parsed["suffix"], feature)
+
+
+CEO = "ceo"
+
+
+def ceo_folder() -> Path:
+    return history.DATA_DIR / "hq"
+
+
+def ceo_md() -> str:
+    parts = []
+    for rel in ("prompts/ceo.md",):
+        f = prompt_file(rel)
+        if f:
+            parts.append(f.read_text().strip())
+    try:
+        company = load_company()
+        divs = ", ".join(f"`{d.id}`({d.name})" for d in company.org.divisions.values()) or "없음"
+        tpls = ", ".join(f"`{t}`" for t in company.process.templates) or "없음"
+    except (LaunchError, models.DefinitionError):
+        divs, tpls = "정의 확인 필요", "정의 확인 필요"
+    parts.append("# 현재 상황\n\n"
+                 f"- 본부: {divs}\n- 프로세스 템플릿: {tpls}\n"
+                 f"- 정의 폴더(읽기 전용): `{tokens.company_dir()}`\n"
+                 f"- 도구 경로: `{BIN / 'orgctl'}`, `{BIN / 'directive'}`")
+    return "\n\n".join(parts) + "\n"
+
+
+def ensure_ceo(start_claude: bool = True) -> dict:
+    path = ceo_folder()
+    path.mkdir(parents=True, exist_ok=True)
+    exists = tmuxctl.session_exists(CEO)
+    if not exists:
+        r = tmuxctl.tmux("new-session", "-d", "-s", CEO, "-c", str(path))
+        if r.returncode != 0:
+            raise LaunchError(f"tmux 세션 생성 실패: {r.stderr.strip()}")
+    token = tokens.write_session_token(CEO, "ceo")
+    env = {"TMUX_WEB_SESSION": CEO, "TMUX_WEB_TOKEN": token, "TMUX_WEB_URL": server_url(),
+           "PATH": f"{BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
+    deny = [f"Read(/{p.resolve().as_posix()}/**)" for p in (tokens.secrets_dir(), history.DATA_DIR / "directives")]
+    deny += [f"Edit(/{tokens.company_dir().resolve().as_posix()}/**)"]
+    perms = {"defaultMode": "dontAsk",
+             "allow": ["Read", "Grep", "Glob", "Edit(/**)", "Bash(orgctl:*)", f"Bash({BIN / 'orgctl'}:*)",
+                       "Bash(directive:*)", f"Bash({BIN / 'directive'}:*)"],
+             "deny": deny}
+    write_settings(path, perms, env)
+    md = ceo_md()
+    (path / "CLAUDE.md").write_text(md)
+    env_file = path / ".claude" / "tmux-web.env"
+    fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("".join(f"export {k}={shlex.quote(v)}\n" for k, v in env.items()))
+    meta = sessions_meta.update(CEO, division="*", dept="hq", role="ceo", worktree=str(path), configured=True, builtin=True)
+    history.record({"type": "session_configure", "session": CEO, "source": "launcher",
+                    "claude_md_sha256": hashlib.sha256(md.encode()).hexdigest()[:16]})
+    started = False
+    if start_claude and not exists:
+        cmd = claude_command()
+        tmuxctl.tmux("send-keys", "-t", f"={CEO}:", f". {shlex.quote(str(env_file))} && {cmd}", "Enter")
+        started = True
+    return {"name": CEO, "created": not exists, "started": started, **meta}

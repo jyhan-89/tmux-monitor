@@ -87,7 +87,23 @@ def test_model_and_patch(client):
     assert client.patch("/api/company/org", json={"ops": [{"path": ["roles", "impl", "allowed_tools", 99], "value": "x"}]}).status_code == 400
 
 
-def test_init_example_and_empty(client, tmp_path):
+@pytest.fixture
+def fake_tmux(monkeypatch):
+    import subprocess as sp
+    import tmuxctl
+    live, sent = set(), []
+
+    def tmux(*a):
+        sent.append(a)
+        if a[0] == "new-session":
+            live.add(a[a.index("-s") + 1])
+        return sp.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(tmuxctl, "tmux", tmux)
+    monkeypatch.setattr(tmuxctl, "session_exists", lambda n: n in live)
+    return sent
+
+
+def test_init_example_and_empty(client, tmp_path, fake_tmux):
     assert client.post("/api/company/init", json={"template": "nope"}).status_code == 400
     assert client.post("/api/company/init", json={"template": "empty"}).status_code == 200
     assert client.get("/api/company").json()["complete"] is True
@@ -98,7 +114,7 @@ def test_init_example_and_empty(client, tmp_path):
     assert s["orchestrator"] == {"alive": False, "last": None}
 
 
-def test_init_example(client):
+def test_init_example(client, fake_tmux):
     assert client.post("/api/company/init", json={"template": "example"}).status_code == 200
     assert "mw" in client.get("/api/company/model").json()["org"]["divisions"]
 
@@ -108,3 +124,28 @@ def test_layout_roundtrip(client):
     r = client.put("/api/company/layout", json={"templates": {"feature_dev": {"design": [10.4, 20.6], "bad": [1]}}})
     assert r.status_code == 200
     assert client.get("/api/company/layout").json() == {"templates": {"feature_dev": {"design": [10, 21]}}}
+
+
+def test_init_creates_ceo_session(client, fake_tmux):
+    import json as _json
+    import history
+    import sessions_meta
+    r = client.post("/api/company/init", json={"template": "example"}).json()
+    assert r["ceo"]["name"] == "ceo" and r["ceo"]["created"] and r["ceo"]["started"]
+    hq = history.DATA_DIR / "hq"
+    md = (hq / "CLAUDE.md").read_text()
+    assert "사장" in md and "orgctl" in md and "`mw`" in md
+    settings = _json.loads((hq / ".claude" / "settings.json").read_text())
+    assert "Bash(orgctl:*)" in settings["permissions"]["allow"] and settings["permissions"]["defaultMode"] == "dontAsk"
+    token = settings["env"]["TMUX_WEB_TOKEN"]
+    assert tokens.lookup(token)["role"] == "ceo"
+    meta = sessions_meta.get("ceo")
+    assert meta["builtin"] and meta["division"] == "*" and meta["dept"] == "hq"
+    keys = [a for a in fake_tmux if a[0] == "send-keys"]
+    assert keys and keys[0][-2].endswith("&& claude")
+    h = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/company/org", headers=h).status_code == 200
+    assert client.post("/api/company/instances", json={"division": "mw", "feature": "f1"}, headers=h).status_code == 200
+    assert client.post("/api/company/process/check", json={"text": "version: 2"}, headers=h).status_code == 400
+    again = client.post("/api/company/ceo").json()
+    assert again["created"] is False and not again["started"]

@@ -192,9 +192,16 @@ function orgHeader(key, label, members, depth, kind) {
   return li;
 }
 
-function renderOrgSections(ul, orgs) {
+function renderOrgSections(ul, all) {
+  let orgs = all;
   const divs = [...new Set(orgs.map((s) => s.meta.division))].sort((a, b) => (a === '*') - (b === '*') || a.localeCompare(b));
-  for (const div of divs) {
+  const hq = orgs.filter((s) => s.meta.dept === 'hq');
+  if (hq.length) {
+    ul.appendChild(orgHeader('hq', '🏛 본사', hq, 0, 'org'));
+    if (!collapsedGroups.has('org:hq')) for (const s of hq) ul.appendChild(sessionItem(s, true, 1));
+    orgs = orgs.filter((s) => s.meta.dept !== 'hq');
+  }
+  for (const div of divs.filter((d) => orgs.some((s) => s.meta.division === d))) {
     const inDiv = orgs.filter((s) => s.meta.division === div);
     const label = div === '*' ? '🏢 전사 공통' : `🏢 ${div}${divisionNames[div] ? ` · ${divisionNames[div]}` : ''}`;
     ul.appendChild(orgHeader(div, label, inDiv, 0, 'org'));

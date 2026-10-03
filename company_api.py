@@ -132,7 +132,19 @@ def init(body: Init, _: dict = Depends(tokens.require("company.write"))):
         git_commit(k)
     tokens.ensure_token("orchestrator")
     tokens.ensure_token("hook")
-    return {"ok": True}
+    try:
+        ceo = launcher.ensure_ceo()
+    except launcher.LaunchError as e:
+        ceo = {"error": str(e)}
+    return {"ok": True, "ceo": ceo}
+
+
+@router.post("/ceo")
+def ceo_session(_: dict = Depends(tokens.require("company.write"))):
+    try:
+        return launcher.ensure_ceo()
+    except launcher.LaunchError as e:
+        raise HTTPException(400, str(e))
 
 
 def orchestrator_alive() -> dict:
@@ -395,6 +407,16 @@ def patch_kind(kind: str, body: Patch, who: dict = Depends(tokens.require("compa
         apply_op(data, op)
     text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=120)
     return put_kind(kind, Definition(text=text), who)
+
+
+@router.post("/{kind}/check")
+def check_kind_text(kind: str, body: Definition, _: dict = Depends(tokens.require("company.write"))):
+    check_kind(kind)
+    try:
+        warnings = validate({**read_texts(), kind: body.text})
+    except models.DefinitionError as e:
+        raise HTTPException(400, {"message": "정의 검증에 실패했습니다", "issues": [i.as_dict() for i in e.issues]})
+    return {"ok": True, "warnings": [w.as_dict() for w in warnings]}
 
 
 @router.put("/{kind}")

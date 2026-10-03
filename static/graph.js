@@ -402,6 +402,19 @@ function renderActions() {
     box.appendChild(b);
   };
   if (!graph.model?.org) return;
+  const ceoBtn = document.createElement('button');
+  ceoBtn.textContent = '🏛 사장';
+  ceoBtn.title = '조직을 관리하는 사장 세션 열기 (없으면 만들기)';
+  ceoBtn.onclick = async () => {
+    if (!sessionInfo('ceo')) {
+      try { await api('POST', '/company/ceo'); } catch (e) { return toast(e.message, 4000); }
+      toast('사장 세션을 만들었습니다');
+      await refresh();
+    }
+    closeGraph();
+    openSession('ceo');
+  };
+  box.appendChild(ceoBtn);
   if (graph.view === 'org') {
     add('＋ 본부', { kind: 'newdiv' });
   } else {
