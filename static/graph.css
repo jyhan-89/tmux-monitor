@@ -68,8 +68,14 @@
 #gpissues { margin:0; padding-left:16px; color:var(--err); font-size:12px; }
 #gpissues:empty { display:none; }
 @media (max-width:768px) {
+  #graph .ghead { gap:4px; padding:6px; }
+  #graph .ghead button, #graph .ghead select { padding:4px 8px; font-size:13px; }
+  #glegend { display:none; }
+  #gorch { order:10; }
   #graph .gbody { flex-direction:column; }
-  #gpanel { width:auto; max-height:50%; border-left:0; border-top:1px solid var(--line); }
+  #gcanvas { padding:4px; }
+  #gpanel { width:auto; flex:none; max-height:58%; border-left:0; border-top:2px solid var(--accent); box-shadow:0 -6px 18px rgba(0,0,0,.4); }
+  #gfree { margin:10px 4px; }
 }
 #gactions { display:flex; gap:6px; }
 #gactions button { padding:3px 10px; font-size:13px; }
